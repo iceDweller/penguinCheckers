@@ -1,1 +1,1 @@
-'Testing'
+print("hello world")
