@@ -1,2 +1,1 @@
-'test'
-'Test #2'
+'Testing'
