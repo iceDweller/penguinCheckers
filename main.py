@@ -25,3 +25,4 @@ print("hello world")
 rows, columns = 8,8
 board = [[0]*rows]*columns
 print(board)
+#6tf7f7f7yf
