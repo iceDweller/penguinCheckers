@@ -15,7 +15,7 @@ while running:
     player_pos = pygame.mouse.get_pos()
     pygame.draw.circle(screen, "red", player_pos, 10, 0)
     pygame.display.flip()
-    dt = clock.tick(60) / 1000
+    dt = clock.tick(144) / 1000
 
 
 
