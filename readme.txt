@@ -1,1 +1,1 @@
-put readme here
+requires pygame
