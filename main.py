@@ -17,7 +17,7 @@ BLUE = (0, 102, 204)
 # Light tile color
 WHITE = (255, 255, 255)
 # Piece colors (circles); pieces only sit on dark tiles
-PIECE_BLUE  = (0, 0, 255)
+PIECE_BLUE  = (70, 70, 70)
 PIECE_WHITE = (240, 240, 240)
 # Game Loop Control
 clock = pygame.time.Clock()
@@ -64,7 +64,7 @@ def draw_pieces():
 # Create a 2D list (8x8) initialized to 0 to represent empty squares
 board = [[0 for _ in range(ROWS)] for _ in range(ROWS)]
 # Debug print to verify board structure in the console
-print(board)
+# print(board)
 # Top three rows: BLUE pieces on dark squares
 for r in range(0, 3):
     for c in range(ROWS):
