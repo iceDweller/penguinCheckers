@@ -17,7 +17,7 @@ BLUE = (0, 102, 204)
 # Light tile color
 WHITE = (255, 255, 255)
 # Piece colors (circles); pieces only sit on dark tiles
-PIECE_BLUE  = (70, 70, 70)
+PIECE_BLACK  = (70, 70, 70)
 PIECE_WHITE = (240, 240, 240)
 # Game Loop Control
 clock = pygame.time.Clock()
@@ -48,7 +48,7 @@ def draw_pieces():
             # Draw blue pieces
             if piece == 1:
                 pygame.draw.circle(
-                    screen, PIECE_BLUE,
+                    screen, PIECE_BLACK,
                     # Calculate the center of the current square
                     (c * TILE_SIZE + TILE_SIZE // 2, r * TILE_SIZE + TILE_SIZE // 2),
                     radius
