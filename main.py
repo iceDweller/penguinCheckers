@@ -25,7 +25,6 @@ running = True
 # helpers
 def is_dark_square(r, c):
     return (r + c) % 2 != 0
-
 # Draws the 8x8 Checkerboard
 def draw_board():
     """
