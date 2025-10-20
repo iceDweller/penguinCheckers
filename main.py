@@ -63,6 +63,12 @@ class checker:
     def draw_self(self):
         pygame.draw.circle(screen,self.player,self.location,20)
 
+def ui_creation():
+    pygame.draw.rect(screen,(255,255,255) ,(0,0,100,1280))
+    pygame.draw.rect(screen02)
+    pygame.display.flip()
+
+
 
 def checker_creation():
     i=0
@@ -80,32 +86,31 @@ def checker_creation():
                 player_red_list_of_checkers.append(checker((640, 640), "normal", "red"))
                 x = x + 1
         i = i + 1
-def board_creation():
+def board_creation(startingx,startingy):
     i = 0
     while i<8:
         x=0
         if i%2== 0:
             while x < 8:
                 if x%2 == 1:
-                    pygame.draw.rect(screen, "red",(x*8*10,i*8*10,80,80))
+                    pygame.draw.rect(screen, "red",(int(startingx)+x*8*10,int(startingy)+i*8*10,80,80))
 
                 else:
-                    pygame.draw.rect(screen, "blue", (x * 8 * 10, i * 8 * 10,80,80))
+                    pygame.draw.rect(screen, "blue", (int(startingx)+x*8*10,int(startingy)+i*8*10,80,80))
                     #if i <4: player_blue_list_of_checkers.append(checker(((x * 8 * 10)-40,(i * 8 * 10)-40),"normal" ,"red"))
                 x = x + 1
         else:
             while x < 8:
                 if x % 2 == 1:
-                    pygame.draw.rect(screen, "blue", (x * 8 * 10, i * 8 * 10, 80, 80))
+                    pygame.draw.rect(screen, "blue", (int(startingx)+x*8*10,int(startingy)+i*8*10,80,80))
                     #if i<4: player_blue_list_of_checkers.append(checker(((x * 8 * 10) - 40, (i * 8 * 10) - 40), "normal", "red"))
                 else:
-                    pygame.draw.rect(screen, "red", (x * 8 * 10, i * 8 * 10, 80, 80))
+                    pygame.draw.rect(screen, "red", (int(startingx)+x*8*10,int(startingy)+i*8*10,80,80))
                 x = x + 1
         i = i + 1
         pygame.display.flip()
 
-def screen_update():
-    for i in range(len(player_blue_list_of_checkers)):
+
 
 def startup():
 
@@ -120,7 +125,8 @@ def startup():
 player_blue_list_of_checkers =[]
 player_red_list_of_checkers = []
 checker_creation()
-board_creation()
+ui_creation()
+board_creation(100,0)
 print(range(len(player_blue_list_of_checkers)))
 while running:
 
