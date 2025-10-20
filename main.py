@@ -1,104 +1,82 @@
 import pygame
 
-# Initialize Pygame
 pygame.init()
-
-# Constants
 ROWS = 8
 TILE_SIZE = 100
 WIDTH = HEIGHT = ROWS * TILE_SIZE
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
 pygame.display.set_caption("Penguin Checkers")
 
-# Colors
 BLUE = (0, 102, 204)
 WHITE = (255, 255, 255)
-PIECE_BLUE  = (0, 0, 255)
+
+PIECE_BLUE = (0, 0, 255)
 PIECE_WHITE = (240, 240, 240)
 
-# Game Loop Control
 clock = pygame.time.Clock()
 running = True
 
-# Selection State
-selected_piece = None  # NEW: to keep track of selected piece
-
-# Helper
 def is_dark_square(r, c):
     return (r + c) % 2 != 0
 
-# Draw Functions
 def draw_board():
     for row in range(ROWS):
         for col in range(ROWS):
+
             color = WHITE if (row + col) % 2 == 0 else BLUE
+
             pygame.draw.rect(screen, color,
                              (col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE))
-
+            
 def draw_pieces():
     radius = TILE_SIZE // 2 - 12
     for r in range(ROWS):
         for c in range(ROWS):
             piece = board[r][c]
+            # Draw blue pieces
             if piece == 1:
                 pygame.draw.circle(
                     screen, PIECE_BLUE,
+                    # Calculate the center of the current square
                     (c * TILE_SIZE + TILE_SIZE // 2, r * TILE_SIZE + TILE_SIZE // 2),
                     radius
                 )
+            # Draw white pieces
             elif piece == 2:
                 pygame.draw.circle(
                     screen, PIECE_WHITE,
+                    # Calculate the center of the current square
                     (c * TILE_SIZE + TILE_SIZE // 2, r * TILE_SIZE + TILE_SIZE // 2),
                     radius
                 )
-
-    # Optional: Draw red border around selected piece
-    if selected_piece:
-        r, c = selected_piece
-        pygame.draw.rect(screen, (255, 0, 0), (c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE, TILE_SIZE), 3)
-
-# Create Board
+# Create a 2D list (8x8) initialized to 0 to represent empty squares
 board = [[0 for _ in range(ROWS)] for _ in range(ROWS)]
+# Debug print to verify board structure in the console
+print(board)
+# Top three rows: BLUE pieces on dark squares
 for r in range(0, 3):
     for c in range(ROWS):
         if is_dark_square(r, c):
             board[r][c] = 1
+# Bottom three rows: WHITE pieces on dark squares
 for r in range(5, 8):
     for c in range(ROWS):
         if is_dark_square(r, c):
             board[r][c] = 2
-
 # Main Game Loop
 while running:
+    # Handle events (close window, etc.)
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            mouse_x, mouse_y = pygame.mouse.get_pos()
-            row = mouse_y // TILE_SIZE
-            col = mouse_x // TILE_SIZE
-
-            if selected_piece is None:
-                # Select a piece
-                if board[row][col] != 0:
-                    selected_piece = (row, col)
-                    print(f"Selected piece at {selected_piece}")
-            else:
-                # Move to empty tile
-                from_row, from_col = selected_piece
-                if board[row][col] == 0:
-                    board[row][col] = board[from_row][from_col]
-                    board[from_row][from_col] = 0
-                    print(f"Moved piece from {selected_piece} to {(row, col)}")
-                else:
-                    print(f"Tile at {(row, col)} is occupied.")
-                selected_piece = None
-
+    # Draw the board every frame
     draw_board()
+    #put pieces in default position
     draw_pieces()
+    # Update the display
     pygame.display.flip()
+    # Control the frame rate
     clock.tick(60)
-
+# Clean up when the game window is closed
 pygame.quit()
