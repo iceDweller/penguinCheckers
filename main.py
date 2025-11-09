@@ -6,20 +6,27 @@ pygame.init()
 # -----------------------------
 # Window / Board Setup
 # -----------------------------
-# Create an 800x800 window for the checkers game
-screen = pygame.display.set_mode((800, 800))
-pygame.display.set_caption("Penguin Checkers")  # Title of the game window
+# create an 800x800 window initially with scalability
+UI_SPACE_HEIGHT = 60
+info = pygame.display.Info()
+SCREEN_WIDTH = min(info.current_w-100,800)
+SCREEN_HEIGHT = min(info.current_h-100,800)+60
+screen = pygame.display.set_mode((SCREEN_WIDTH,SCREEN_HEIGHT)) #add pygame.RESIZABLE if you want to mess with scaling (I do not right now)
+pygame.display.set_caption("Penguin Checkers")
 
-# The checkers board has 8 rows and 8 columns
+# calc tile size based on screen
+TILE_SIZE = min(SCREEN_WIDTH,SCREEN_HEIGHT)//8
+BOARD_SIZE = TILE_SIZE*8
+BOARD_OFFSET_X = (SCREEN_WIDTH-BOARD_SIZE)//2
+BOARD_OFFSET_Y = 0
 ROWS = 8
-TILE_SIZE = 100  # Each square is 100x100 pixels
 
 # Define board colors (light and dark squares)
 BLUE_TILE = (0, 102, 204)     # Dark squares (blue)
 WHITE_TILE = (255, 255, 255)  # Light squares (white)
 
 # Define piece colors
-BLACK = (0, 0, 0)             # Black player pieces
+BLACK = (35, 35, 35)             # Black player pieces
 WHITE = (255, 255, 255)       # White player pieces
 
 # Define colors for highlights and effects
@@ -34,20 +41,23 @@ clock = pygame.time.Clock()
 # -----------------------------
 # Game state variables
 # -----------------------------
-# Lists to store each player's pieces
-player_white_pieces = []
-player_black_pieces = []
-
-# Keep track of whose turn it is (white moves first)
-current_turn = WHITE
+# store game state and history
+board_state = []
+board_history = []
 
 # Variables used for selecting and moving pieces
+# even = white's turn, odd = black's turn
+turn = 0
 selected_piece = None
 valid_moves = []
 dragging = False
 orig_pos = None
 offset_x = offset_y = 0
 multi_jump = False
+jump_occurred = False
+game_over = False
+game_winner = None
+show_menu = False
 
 # -----------------------------
 # Checker Class - represents one checker piece
@@ -58,7 +68,7 @@ class Checker:
         self.status = status       # "normal" or "king"
         self.player = player       # Which player this piece belongs to
         self.king = False          # Whether the piece is a king yet
-        self.radius = 35           # Circle size for the piece
+        self.radius = TILE_SIZE//3           # Circle size for the piece
         # White pieces move up (-1), Black pieces move down (+1)
         self.direction = -1 if player == WHITE else 1
         self.update_rect()         # Define the clickable area
@@ -104,31 +114,44 @@ class Checker:
 # -----------------------------
 # Helper Functions
 # -----------------------------
+def get_current_turn():
+    return WHITE if turn % 2 == 0 else BLACK
+
 def pixel_to_board(pos):
-    """Convert screen pixel coordinates to board row/column indexes."""
     x, y = pos
-    return y // TILE_SIZE, x // TILE_SIZE
+    board_x = x - BOARD_OFFSET_X
+    board_y = y - UI_SPACE_HEIGHT
+
+    if 0 <= board_x < BOARD_SIZE and 0 <= board_y < BOARD_SIZE:
+        col = int(board_x // TILE_SIZE)
+        row = int(board_y // TILE_SIZE)
+        return row, col
+    return -1, -1
 
 def board_to_pixel(row, col):
-    """Convert board row/column back into pixel coordinates."""
-    return (col * TILE_SIZE + TILE_SIZE // 2, row * TILE_SIZE + TILE_SIZE // 2)
+    x = BOARD_OFFSET_X + col * TILE_SIZE + TILE_SIZE // 2
+    y = UI_SPACE_HEIGHT + row * TILE_SIZE + TILE_SIZE // 2
+    return (x, y)
+
+def board_to_screen_pixel(row, col):
+    # need this for all the graphics elements to work
+    x = BOARD_OFFSET_X + col * TILE_SIZE + TILE_SIZE // 2
+    y = UI_SPACE_HEIGHT + row * TILE_SIZE + TILE_SIZE // 2
+    return (x, y)
 
 def is_dark_square(r, c):
-    """Return True if the given board square should be dark blue."""
     return (r + c) % 2 != 0
 
 def piece_at(row, col):
     """Check if a piece exists at a specific board position."""
-    for p in player_white_pieces + player_black_pieces:
+    for p in board_state:
         pr, pc = pixel_to_board(p.location)
         if pr == row and pc == col:
             return p
     return None
 
 def create_starting_pieces():
-    """Place the starting pieces for both players on dark squares."""
-    player_white_pieces.clear()
-    player_black_pieces.clear()
+    board_state.clear()
 
     for r in range(ROWS):
         for c in range(ROWS):
@@ -136,27 +159,26 @@ def create_starting_pieces():
             if not is_dark_square(r, c):
                 continue
 
-            x = c * TILE_SIZE + TILE_SIZE // 2
-            y = r * TILE_SIZE + TILE_SIZE // 2
+            x,y = board_to_pixel(r,c)
 
             # Black pieces occupy the top 3 rows
             if r < 3:
-                player_black_pieces.append(Checker((x, y), "normal", BLACK))
+                board_state.append(Checker((x, y), "normal", BLACK))
             # White pieces occupy the bottom 3 rows
             elif r > 4:
-                player_white_pieces.append(Checker((x, y), "normal", WHITE))
+                board_state.append(Checker((x, y), "normal", WHITE))
 
 def draw_board():
-    """Draw the 8x8 blue-and-white checkerboard."""
     for row in range(ROWS):
         for col in range(ROWS):
+            x = BOARD_OFFSET_X + col * TILE_SIZE
+            y = UI_SPACE_HEIGHT + row * TILE_SIZE
             color = WHITE_TILE if (row + col) % 2 == 0 else BLUE_TILE
-            pygame.draw.rect(screen, color, (col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE))
+            pygame.draw.rect(screen, color, (x, y, TILE_SIZE, TILE_SIZE))
 
 def draw_all_pieces():
-    """Draw all checker pieces currently on the board."""
-    for piece in player_white_pieces + player_black_pieces:
-        piece.draw_self()
+    for p in board_state:
+        p.draw_self()
 
 def get_valid_moves(piece, only_jumps=False):
     """Find valid diagonal moves (and jumps) for a piece."""
@@ -189,9 +211,131 @@ def get_valid_moves(piece, only_jumps=False):
     return jumps if jumps else moves
 
 def get_forced_jump_pieces(player_color):
-    """Return a list of pieces that must jump (if jump moves exist)."""
-    pieces = player_white_pieces if player_color == WHITE else player_black_pieces
-    return [piece for piece in pieces if get_valid_moves(piece, only_jumps=True)]
+    pieces = [p for p in board_state if p.player == player_color]
+    jump_pieces = []
+    for piece in pieces:
+        # Check if this piece has any jump moves available
+        jump_moves = get_valid_moves(piece, only_jumps=True)
+        if jump_moves:  # If there are any jump moves, this piece must jump
+            jump_pieces.append(piece)
+    return jump_pieces
+
+def reset_game():
+    global board_state, turn, selected_piece, valid_moves, dragging
+    global orig_pos,multi_jump,jump_occurred,hover_piece,game_over,game_winner,board_history
+    create_starting_pieces()
+    # even = white turn, odd = black turn
+    turn = 0
+    selected_piece = None
+    valid_moves = []
+    dragging = False
+    orig_pos = None
+    multi_jump = False
+    jump_occurred = False
+    hover_piece = None
+    game_over = False
+    game_winner = None
+    board_history = []
+
+def check_game_over():
+    global game_over, game_winner
+
+    #get num pieces for each player
+    white_pieces = [p for p in board_state if p.player==WHITE]
+    black_pieces = [p for p in board_state if p.player==BLACK]
+
+    if len(white_pieces) == 0:
+        game_over = True
+        game_winner = "BLACK"
+        return True
+    if len(black_pieces) == 0:
+        game_over = True
+        game_winner = "WHITE"
+        return True
+
+    current_player_pieces = [p for p in board_state if p.player == get_current_turn()]
+    has_valid_move = False
+
+    for piece in current_player_pieces:
+        if get_valid_moves(piece):
+            has_valid_move = True
+            break
+
+    if not has_valid_move:
+        # Current player has no valid moves, game over
+        game_over = True
+        game_winner = "BLACK" if get_current_turn() == WHITE else "WHITE"
+        return True
+    return False
+
+def draw_menu():
+    # draw settings menu
+    menu_width, menu_height = 400, 300
+    menu_x = (SCREEN_WIDTH - menu_width) // 2
+    menu_y = (SCREEN_HEIGHT - menu_height) // 2
+
+    pygame.draw.rect(screen, (200, 200, 200), (menu_x, menu_y, menu_width, menu_height))
+    pygame.draw.rect(screen, (100, 100, 100), (menu_x, menu_y, menu_width, menu_height), 4)
+
+    font = pygame.font.SysFont(None, 36)
+    title = font.render("Settings", True, (0, 0, 0))
+    screen.blit(title, (menu_x + menu_width // 2 - title.get_width() // 2, menu_y + 20))
+
+    close_button = pygame.Rect(menu_x + menu_width - 40, menu_y + 10, 30, 30)
+    pygame.draw.rect(screen, (255, 0, 0), close_button)
+    close_text = font.render("X", True, (255, 255, 255))
+    screen.blit(close_text, (close_button.centerx - close_text.get_width() // 2,
+                             close_button.centery - close_text.get_height() // 2))
+
+    return close_button
+
+def draw_ui_buttons():
+    # Draw UI bar background
+    ui_bar_height = UI_SPACE_HEIGHT
+    pygame.draw.rect(screen, (50, 50, 50), (0, 0, SCREEN_WIDTH, ui_bar_height))
+    pygame.draw.rect(screen, (100, 100, 100), (0, 0, SCREEN_WIDTH, ui_bar_height), 4)
+
+    # Draw turn indicator in the UI bar
+    turn_text = font.render(f"Turn: {'White' if turn % 2 == 0 else 'Black'}", True, (255, 255, 255))
+    screen.blit(turn_text, (10, 10))
+
+    # Draw menu button
+    menu_button = pygame.Rect(SCREEN_WIDTH - 220, 10, 100, 40)
+    pygame.draw.rect(screen, (50, 50, 150), menu_button)
+    pygame.draw.rect(screen, (100, 100, 200), menu_button, 2)
+    menu_text = font.render("Menu", True, (255, 255, 255))
+    screen.blit(menu_text, (menu_button.centerx - menu_text.get_width() // 2,
+                            menu_button.centery - menu_text.get_height() // 2))
+
+    # Draw reset button
+    reset_button = pygame.Rect(SCREEN_WIDTH - 110, 10, 100, 40)
+    pygame.draw.rect(screen, (150, 50, 50), reset_button)
+    pygame.draw.rect(screen, (200, 100, 100), reset_button, 2)
+    reset_text = font.render("Reset", True, (255, 255, 255))
+    screen.blit(reset_text, (reset_button.centerx - reset_text.get_width() // 2,
+                             reset_button.centery - reset_text.get_height() // 2))
+
+    return menu_button, reset_button
+
+def scale_window():
+    global SCREEN_WIDTH, SCREEN_HEIGHT, TILE_SIZE, BOARD_SIZE, BOARD_OFFSET_X, BOARD_OFFSET_Y
+    info = pygame.display.Info()
+    SCREEN_WIDTH = min(info.current_w - 100, 1080)
+    SCREEN_HEIGHT = min(info.current_h - 100, 1080)
+    TILE_SIZE = min(SCREEN_WIDTH, SCREEN_HEIGHT) // 8
+    BOARD_SIZE = TILE_SIZE * 8
+    BOARD_OFFSET_X = (SCREEN_WIDTH - BOARD_SIZE) // 2
+    BOARD_OFFSET_Y = (SCREEN_HEIGHT - BOARD_SIZE) // 2
+
+def save_game_state():
+    print()
+
+# add anything here you want to call whenever a turn ends (i.e. print debugging)
+def on_turn_end():
+    check_game_over()
+    save_game_state()
+    print(board_state)
+
 
 # -----------------------------
 # Game Loop Setup
@@ -222,120 +366,157 @@ while running:
         if event.type == pygame.QUIT:
             running = False  # Close game window
 
-        # Hover highlight (shows green outline when cursor hovers over a piece)
-        if event.type == pygame.MOUSEMOTION:
-            hover_piece = None
-            for piece in player_white_pieces + player_black_pieces:
-                if piece.clicked(mouse_pos):
-                    hover_piece = piece
-                    break
+        # resize window (EXPERIMENTAL)
+        # if event.type == pygame.VIDEORESIZE:
+        #     SCREEN_WIDTH, SCREEN_HEIGHT = event.size
+        #     scale_window()
 
-        # Pick up a piece (left click)
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if not selected_piece:
-                for piece in player_white_pieces + player_black_pieces:
-                    # Only allow clicking on your own turn’s pieces
-                    if piece.clicked(mouse_pos) and piece.player == current_turn:
-                        forced_pieces = get_forced_jump_pieces(current_turn)
-                        # Must jump if a jump is available
-                        if forced_pieces and piece not in forced_pieces:
-                            continue
-                        only_jumps = bool(forced_pieces) or jump_occurred
-                        moves = get_valid_moves(piece, only_jumps=only_jumps)
-                        if moves:
-                            selected_piece = piece
-                            valid_moves = moves
-                            dragging = True
-                            orig_pos = piece.location
-                            offset_x = piece.location[0] - mouse_pos[0]
-                            offset_y = piece.location[1] - mouse_pos[1]
-                            break
+        if not show_menu:
+            # Hover highlight (shows green outline when cursor hovers over a piece)
+            if event.type == pygame.MOUSEMOTION:
+                hover_piece = None
+                adj_mpos = (mouse_pos[0], mouse_pos[1])  # Adjust mouse position
+                for piece in board_state:
+                    if piece.rect.collidepoint(adj_mpos):  # Use adjusted position for hover
+                        hover_piece = piece
+                        break
 
-        # Drag piece with mouse
-        if event.type == pygame.MOUSEMOTION and dragging and selected_piece:
-            mx, my = mouse_pos
-            selected_piece.update_location((mx + offset_x, my + offset_y))
+            # Pick up a piece (left click)
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                # Check if UI buttons were clicked
+                menu_button, reset_button = draw_ui_buttons()  # Draw UI and get button positions
 
-        # Drop piece (when releasing mouse)
-        if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and dragging:
-            dragging = False
-            if selected_piece:
-                sr, sc = pixel_to_board(orig_pos)
-                dr, dc = row - sr, col - sc
+                if menu_button.collidepoint(mouse_pos):
+                    show_menu = True
+                elif reset_button.collidepoint(mouse_pos):
+                    reset_game()
+                elif not selected_piece and not game_over:
+                    for piece in board_state:
+                        # Only allow clicking on your own turn's pieces
+                        if piece.clicked(mouse_pos) and piece.player == get_current_turn():
+                            forced_pieces = get_forced_jump_pieces(get_current_turn())
+                            # Must jump if a jump is available
+                            if forced_pieces and piece not in forced_pieces:
+                                continue
+                            only_jumps = bool(forced_pieces) or jump_occurred
+                            moves = get_valid_moves(piece, only_jumps=only_jumps)
+                            if moves:
+                                selected_piece = piece
+                                valid_moves = moves
+                                dragging = True
+                                orig_pos = piece.location
+                                offset_x = 0
+                                offset_y = 0
+                                break
 
-                # Check if move is valid
-                if (row, col) in valid_moves:
-                    # Handle jump moves
-                    if abs(dr) == 2:
-                        jumped = piece_at(sr + dr // 2, sc + dc // 2)
-                        if jumped:
-                            # Remove captured piece from the opponent's list
-                            if jumped in player_white_pieces:
-                                player_white_pieces.remove(jumped)
-                            else:
-                                player_black_pieces.remove(jumped)
-                        # Move jumped piece to new location
-                        selected_piece.update_location(board_to_pixel(row, col))
-                        jump_occurred = True
-                        # Check if more jumps are possible (multi-jump)
-                        multi_jump = get_valid_moves(selected_piece, only_jumps=True)
-                        if multi_jump:
-                            valid_moves = multi_jump
-                            orig_pos = selected_piece.location
-                            dragging = True
-                        else:
-                            # Switch turns after last jump
-                            selected_piece = None
-                            valid_moves = []
-                            multi_jump = False
-                            jump_occurred = False
-                            current_turn = BLACK if current_turn == WHITE else WHITE
-                    else:
-                        # Normal (non-jump) move
-                        if jump_occurred:
-                            selected_piece.update_location(orig_pos)
-                        else:
+            # Drag piece with mouse
+            if event.type == pygame.MOUSEMOTION and dragging and selected_piece:
+                mx, my = mouse_pos
+                selected_piece.update_location((mx, my))
+
+            # Drop piece (when releasing mouse)
+            if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and dragging:
+                dragging = False
+                if selected_piece:
+                    row, col = pixel_to_board(mouse_pos)
+
+                    sr, sc = pixel_to_board(orig_pos)
+                    dr, dc = row - sr, col - sc
+
+                    # Check if move is valid
+                    if (row, col) in valid_moves:
+                        # Handle jump moves
+                        if abs(dr) == 2:
+                            jumped = piece_at(sr + dr // 2, sc + dc // 2)
+                            if jumped:
+                                board_state.remove(jumped)
+                            # Move jumped piece to new location
                             selected_piece.update_location(board_to_pixel(row, col))
-                            selected_piece = None
-                            valid_moves = []
-                            current_turn = BLACK if current_turn == WHITE else WHITE
-                else:
-                    # If move is invalid, reset to original position
-                    selected_piece.update_location(orig_pos)
-                    selected_piece = None
-                    valid_moves = []
+                            jump_occurred = True
+                            # Check if more jumps are possible (multi-jump)
+                            multi_jump = get_valid_moves(selected_piece, only_jumps=True)
+                            if multi_jump:
+                                valid_moves = multi_jump
+                                orig_pos = selected_piece.location
+                                dragging = True
+                            else:
+                                # Switch turns after last jump
+                                selected_piece = None
+                                valid_moves = []
+                                multi_jump = False
+                                jump_occurred = False
+                                turn += 1
+                                on_turn_end()
+                        else:
+                            # Normal (non-jump) move
+                            if jump_occurred:
+                                selected_piece.update_location(orig_pos)
+                            else:
+                                selected_piece.update_location(board_to_pixel(row, col))
+                                selected_piece = None
+                                valid_moves = []
+                                turn += 1
+                                on_turn_end()
+                    else:
+                        # If move is invalid, reset to original position
+                        selected_piece.update_location(orig_pos)
+                        selected_piece = None
+                        valid_moves = []
+        # Handle menu events
+        else:
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                close_button = pygame.Rect(SCREEN_WIDTH // 2 + 150, SCREEN_HEIGHT // 2 - 140, 30, 30)
+                if close_button.collidepoint(mouse_pos):
+                    show_menu = False
 
     # -----------------------------
     # Drawing Section
     # -----------------------------
     screen.fill((0, 0, 0))       # Clear screen each frame
-    draw_board()                 # Draw blue and white board
-    draw_all_pieces()            # Draw all checkers
+    if not show_menu:
+        draw_ui_buttons()
+        draw_board()  # Draw blue and white board
+        draw_all_pieces()  # Draw all checkers
 
-    # Highlight pieces forced to jump (yellow border)
-    forced_pieces = get_forced_jump_pieces(current_turn)
-    for piece in forced_pieces:
-        pygame.draw.circle(screen, HIGHLIGHT_YELLOW, piece.location, piece.radius + 5, 4)
+        # Highlight pieces forced to jump (yellow border)
+        forced_pieces = get_forced_jump_pieces(get_current_turn())
+        for piece in forced_pieces:
+            screen_pos = (piece.location[0], piece.location[1])
+            pygame.draw.circle(screen, HIGHLIGHT_YELLOW, screen_pos, piece.radius + 5, 4)
 
-    # Show valid moves for selected piece (small yellow dots)
-    if selected_piece:
-        for (r, c) in valid_moves:
-            pygame.draw.circle(screen, HIGHLIGHT_YELLOW, board_to_pixel(r, c), 12)
+        # Show valid moves for selected piece (small yellow dots)
+        if selected_piece:
+            for (r, c) in valid_moves:
+                screen_pos = board_to_screen_pixel(r, c)  # Use screen coordinates with UI offset
+                pygame.draw.circle(screen, HIGHLIGHT_YELLOW, screen_pos, 12)
 
-    # Green highlight for hovered piece
-    if hover_piece and hover_piece not in forced_pieces:
-        pygame.draw.circle(screen, HIGHLIGHT_GREEN, hover_piece.location, hover_piece.radius + 5, 3)
+        # Green highlight for hovered piece
+        if hover_piece and hover_piece not in forced_pieces:
+            screen_pos = (hover_piece.location[0], hover_piece.location[1])
+            pygame.draw.circle(screen, HIGHLIGHT_GREEN, screen_pos, hover_piece.radius + 5, 3)
 
-    # Red highlight for currently selected piece
-    if selected_piece:
-        pygame.draw.circle(screen, HIGHLIGHT_RED, selected_piece.location, selected_piece.radius + 5, 3)
+        # Red highlight for currently selected piece
+        if selected_piece:
+            screen_pos = (selected_piece.location[0], selected_piece.location[1])  # Remove + UI_SPACE_HEIGHT
+            pygame.draw.circle(screen, HIGHLIGHT_RED, screen_pos, selected_piece.radius + 5, 3)
 
-    # Display current player's turn at top-left of window
-    turn_text = font.render(f"Turn: {'White' if current_turn == WHITE else 'Black'}", True, (0, 0, 0))
-    screen.blit(turn_text, (10, 10))
+        if game_over:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+            overlay.set_alpha(180)
+            overlay.fill((0, 0, 0))
+            screen.blit(overlay, (0, 0))
+
+            game_over_text = font.render(f"Game over, {game_winner} wins!", True, (255, 255, 255))
+            screen.blit(game_over_text, (SCREEN_WIDTH // 2 - game_over_text.get_width() // 2,SCREEN_HEIGHT // 2 - game_over_text.get_height() // 2))
+    else:
+        close_button=draw_menu()
+
+
 
     # Update everything drawn to the window
     pygame.display.flip()
+
+
 
 # End the program once the window closes
 pygame.quit()
