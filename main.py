@@ -27,7 +27,10 @@ WHITE_TILE = (255, 255, 255)  # Light squares (white)
 
 # Define piece colors
 BLACK = (35, 35, 35)             # Black player pieces
+BLACK_BORDER = (70,70,70)
 WHITE = (255, 255, 255)       # White player pieces
+WHITE_BORDER = (200,200,200)
+HIGHLIGHT_WIDTH = 5
 
 # Define colors for highlights and effects
 HIGHLIGHT_YELLOW = (255, 255, 0)  # Used for showing valid move options
@@ -104,6 +107,10 @@ class Checker:
     def draw_self(self):
         """Draw the piece on the board (with gold center if king)."""
         pygame.draw.circle(screen, self.player, self.location, self.radius)
+        if self.player == WHITE:
+            pygame.draw.circle(screen, WHITE_BORDER, self.location, self.radius, HIGHLIGHT_WIDTH)
+        else:
+            pygame.draw.circle(screen, BLACK_BORDER, self.location, self.radius, HIGHLIGHT_WIDTH)
         if self.king:
             pygame.draw.circle(screen, HIGHLIGHT_GOLD, self.location, self.radius // 2)
 
@@ -262,7 +269,7 @@ def check_game_over():
             break
 
     if not has_valid_move:
-        # Current player has no valid moves, game over
+        # current player has no valid moves, game over
         game_over = True
         game_winner = "BLACK" if get_current_turn() == WHITE else "WHITE"
         return True
@@ -334,7 +341,7 @@ def save_game_state():
 def on_turn_end():
     check_game_over()
     save_game_state()
-    print(board_state)
+    # print(board_state)
 
 
 # -----------------------------
