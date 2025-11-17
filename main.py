@@ -1,4 +1,5 @@
 import pygame
+import time
 
 # Initialize Pygame so we can use all its built-in graphics functions
 pygame.init()
@@ -383,6 +384,8 @@ def scale_window(new_size):
             piece.location = (new_x, new_y)
             piece.radius = TILE_SIZE // 3
             piece.update_rect()
+    
+        time.sleep(5)  # Pauses the program for 5 seconds
 
     #redraq immediately
     pygame.display.flip()
@@ -431,8 +434,7 @@ while running:
         # resize window (EXPERIMENTAL)
         if event.type == pygame.VIDEORESIZE:
             scale_window(event.size)
-            pygame.display.flip()
-
+            
         if not show_menu:
             # Hover highlight (shows green outline when cursor hovers over a piece)
             if event.type == pygame.MOUSEMOTION:
