@@ -727,6 +727,43 @@ while running:
 
     pygame.display.flip()  # Update screen
 
+        # Highlight pieces forced to jump (yellow border)
+        forced_pieces = get_forced_jump_pieces(get_current_turn())
+        for piece in forced_pieces:
+            screen_pos = (piece.location[0], piece.location[1])
+            pygame.draw.circle(screen, HIGHLIGHT_YELLOW, screen_pos, piece.radius + 5, 4)
+
+        # Show valid moves for selected piece (small yellow dots)
+        if selected_piece:
+            for (r, c) in valid_moves:
+                screen_pos = board_to_screen_pixel(r, c)  # Use screen coordinates with UI offset
+                pygame.draw.circle(screen, HIGHLIGHT_YELLOW, screen_pos, 12)
+
+        # Green highlight for hovered piece
+        if hover_piece and hover_piece not in forced_pieces:
+            screen_pos = (hover_piece.location[0], hover_piece.location[1])
+            pygame.draw.circle(screen, HIGHLIGHT_GREEN, screen_pos, hover_piece.radius + 5, 3)
+
+        # Red highlight for currently selected piece
+        if selected_piece:
+            screen_pos = (selected_piece.location[0], selected_piece.location[1])  # Remove + UI_SPACE_HEIGHT
+            pygame.draw.circle(screen, HIGHLIGHT_RED, screen_pos, selected_piece.radius + 5, 3)
+
+        if game_over:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+            overlay.set_alpha(180)
+            overlay.fill((0, 0, 0))
+            screen.blit(overlay, (0, 0))
+
+            game_over_text = font.render(f"Game over, {game_winner} wins!", True, (255, 255, 255))
+            screen.blit(game_over_text, (SCREEN_WIDTH // 2 - game_over_text.get_width() // 2,SCREEN_HEIGHT // 2 - game_over_text.get_height() // 2))
+    else:
+        close_button=draw_menu()
+
+
+
+    # Update everything drawn to the window
+    pygame.display.flip()
 
 
 
