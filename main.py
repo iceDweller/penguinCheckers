@@ -14,10 +14,14 @@ SCREEN_WIDTH = min(info.current_w-100,800)
 SCREEN_HEIGHT = min(info.current_h-100,800)+60
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.RESIZABLE) #add pygame.RESIZABLE if you want to mess with scaling (I do not right now)
 pygame.display.set_caption("Penguin Checkers")
-
+menu_buttons = {
+    "close": None,
+    "easy": None,
+    "hard": None
+}
 
 # Options for AI difficulty
-AI_DIFFICULTY = "HARD"  #"EASY" or "HARD"
+AI_DIFFICULTY = "EASY"  #"EASY" or "HARD"
 
 UI_SCALE = 1.0
 MENU_SCALE = 1.0
@@ -212,6 +216,12 @@ def pixel_to_board(pos):
         return row, col
     return -1, -1
 
+def draw_ai_difficulty():
+    ui_font = pygame.font.SysFont(None, int(24 * UI_SCALE))
+    text = ui_font.render(f"AI Difficulty: {AI_DIFFICULTY}", True, (255, 255, 255))
+    screen.blit(text, (SCREEN_WIDTH - 250, 10 * UI_SCALE))
+
+
 def board_to_pixel(row, col):
     x = BOARD_OFFSET_X + col * TILE_SIZE + TILE_SIZE // 2
     y = UI_SPACE_HEIGHT + row * TILE_SIZE + TILE_SIZE // 2
@@ -353,6 +363,7 @@ def check_game_over():
     return False
 
 def draw_menu():
+    global menu_buttons
     menu_width = int(400 * MENU_SCALE)
     menu_height = int(300 * MENU_SCALE)
     menu_x = (SCREEN_WIDTH - menu_width) // 2
@@ -366,19 +377,31 @@ def draw_menu():
     title = menu_font.render("Settings", True, (0, 0, 0))
     screen.blit(title, (menu_x + menu_width // 2 - title.get_width() // 2, menu_y + int(20 * MENU_SCALE)))
 
-    btn_w = int(30 * MENU_SCALE)
-    btn_h = int(30 * MENU_SCALE)
-    btn_x = int(menu_x + menu_width - (40 * MENU_SCALE))
-    btn_y = int(menu_y + 10 * MENU_SCALE)
-
+    # Close button
+    btn_w, btn_h = int(30 * MENU_SCALE), int(30 * MENU_SCALE)
+    btn_x, btn_y = int(menu_x + menu_width - (40 * MENU_SCALE)), int(menu_y + 10 * MENU_SCALE)
     close_button = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
     pygame.draw.rect(screen, (255, 0, 0), close_button)
-
     close_text = menu_font.render("X", True, (255, 255, 255))
     screen.blit(close_text, (close_button.centerx - close_text.get_width() // 2,
                              close_button.centery - close_text.get_height() // 2))
 
-    return close_button
+    # Easy AI button
+    easy_button = pygame.Rect(menu_x + 50, menu_y + 100, 100, 40)
+    color_easy = (150, 220, 150) if AI_DIFFICULTY == "EASY" else (100, 200, 100)  # highlight selected
+    pygame.draw.rect(screen, color_easy, easy_button)
+    screen.blit(menu_font.render("Easy", True, (0, 0, 0)), (easy_button.x + 10, easy_button.y + 5))
+
+    # Hard AI button
+    hard_button = pygame.Rect(menu_x + 50, menu_y + 160, 100, 40)
+    color_hard = (220, 150, 150) if AI_DIFFICULTY == "HARD" else (200, 100, 100)  # highlight selected
+    pygame.draw.rect(screen, color_hard, hard_button)
+    screen.blit(menu_font.render("Hard", True, (0, 0, 0)), (hard_button.x + 10, hard_button.y + 5))
+
+    # Store buttons in global dict
+    menu_buttons["close"] = close_button
+    menu_buttons["easy"] = easy_button
+    menu_buttons["hard"] = hard_button
 
 def draw_ui_buttons():
     # Draw UI bar background
@@ -540,44 +563,56 @@ font = pygame.font.SysFont(None, 36)  # Font for text display
 # -----------------------------
 # Main Game Loop - runs continuously until window is closed
 # -----------------------------
+# -----------------------------
+# Main Game Loop - Rewritten
+# -----------------------------
 while running:
-    clock.tick(60)  # Run loop at 60 frames per second
+    clock.tick(60)  # Run loop at 60 FPS
     mouse_pos = pygame.mouse.get_pos()
     row, col = pixel_to_board(mouse_pos)
 
+    # -----------------------------
+    # Event Handling
+    # -----------------------------
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            running = False  # Close game window
+            running = False
 
-        # resize window (EXPERIMENTAL)
+        # Resize window
         if event.type == pygame.VIDEORESIZE:
             scale_window(event.size)
 
-        if not show_menu:
-            # Hover highlight (shows green outline when cursor hovers over a piece)
-            if event.type == pygame.MOUSEMOTION:
-                hover_piece = None
-                adj_mpos = (mouse_pos[0], mouse_pos[1])  # Adjust mouse position
-                for piece in board_state:
-                    if piece.rect.collidepoint(adj_mpos):  # Use adjusted position for hover
-                        hover_piece = piece
-                        break
-
-            # Pick up a piece (left click)
+        # -----------------------------
+        # Menu Events
+        # -----------------------------
+        if show_menu:
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                # Check if UI buttons were clicked
-                menu_button, reset_button = draw_ui_buttons()  # Draw UI and get button positions
+                if menu_buttons["close"] and menu_buttons["close"].collidepoint(mouse_pos):
+                    show_menu = False
+                elif menu_buttons["easy"] and menu_buttons["easy"].collidepoint(mouse_pos):
+                    AI_DIFFICULTY = "EASY"
+                elif menu_buttons["hard"] and menu_buttons["hard"].collidepoint(mouse_pos):
+                    AI_DIFFICULTY = "HARD"
 
+        # -----------------------------
+        # Gameplay Events
+        # -----------------------------
+        else:  # show_menu is False
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                # UI Buttons
+                menu_button, reset_button = draw_ui_buttons()
                 if menu_button.collidepoint(mouse_pos):
                     show_menu = True
+                    break
                 elif reset_button.collidepoint(mouse_pos):
                     reset_game()
-                elif not selected_piece and not game_over:
+                    break
+
+                # Piece selection
+                if not selected_piece and not game_over:
                     for piece in board_state:
-                        # Only allow clicking on your own turn's pieces
                         if piece.clicked(mouse_pos) and piece.player == get_current_turn():
                             forced_pieces = get_forced_jump_pieces(get_current_turn())
-                            # Must jump if a jump is available
                             if forced_pieces and piece not in forced_pieces:
                                 continue
                             only_jumps = bool(forced_pieces) or jump_occurred
@@ -587,50 +622,43 @@ while running:
                                 valid_moves = moves
                                 dragging = True
                                 orig_pos = piece.location
-                                offset_x = 0
-                                offset_y = 0
                                 break
 
-            # Drag piece with mouse
+            # Drag piece
             if event.type == pygame.MOUSEMOTION and dragging and selected_piece:
                 mx, my = mouse_pos
                 selected_piece.update_location((mx, my))
 
-            # Drop piece (when releasing mouse)
+            # Drop piece
             if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and dragging:
                 dragging = False
                 if selected_piece:
                     row, col = pixel_to_board(mouse_pos)
-
                     sr, sc = pixel_to_board(orig_pos)
                     dr, dc = row - sr, col - sc
 
-                    # Check if move is valid
                     if (row, col) in valid_moves:
-                        # Handle jump moves
+                        # Jump move
                         if abs(dr) == 2:
                             jumped = piece_at(sr + dr // 2, sc + dc // 2)
                             if jumped:
                                 board_state.remove(jumped)
-                            # Move jumped piece to new location
                             selected_piece.update_location(board_to_pixel(row, col))
                             jump_occurred = True
-                            # Check if more jumps are possible (multi-jump)
                             multi_jump = get_valid_moves(selected_piece, only_jumps=True)
                             if multi_jump:
                                 valid_moves = multi_jump
                                 orig_pos = selected_piece.location
                                 dragging = True
                             else:
-                                # Switch turns after last jump
                                 selected_piece = None
                                 valid_moves = []
                                 multi_jump = False
                                 jump_occurred = False
                                 turn += 1
                                 on_turn_end()
+                        # Normal move
                         else:
-                            # Normal (non-jump) move
                             if jump_occurred:
                                 selected_piece.update_location(orig_pos)
                             else:
@@ -640,72 +668,65 @@ while running:
                                 turn += 1
                                 on_turn_end()
                     else:
-                        # If move is invalid, reset to original position
                         selected_piece.update_location(orig_pos)
                         selected_piece = None
                         valid_moves = []
-        if not dragging and not game_over:
-            if turn % 2 == 1:  # Black's turn (AI)
+
+            # AI turn
+            if not dragging and not game_over and turn % 2 == 1:
                 if AI_DIFFICULTY == "EASY":
                     ai = easy_AI(BLACK)
                 else:
                     ai = hard_AI(BLACK)
                 apply_ai_move(ai)
 
-
-        # Handle menu events
-        else:
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                close_button = draw_menu()
-                if close_button.collidepoint(mouse_pos):
-                    show_menu = False
-
     # -----------------------------
     # Drawing Section
     # -----------------------------
-    screen.fill((0, 0, 0))       # Clear screen each frame
-    if not show_menu:
-        draw_ui_buttons()
-        draw_board()  # Draw blue and white board
-        draw_all_pieces()  # Draw all checkers
+    screen.fill((0, 0, 0))  # Clear screen
 
-        # Highlight pieces forced to jump (yellow border)
+    # UI bar
+    draw_ui_buttons()
+    draw_ai_difficulty()
+
+    if show_menu:
+        draw_menu()
+    else:
+        draw_board()
+        draw_all_pieces()
+
+        # Forced jump highlights
         forced_pieces = get_forced_jump_pieces(get_current_turn())
         for piece in forced_pieces:
-            screen_pos = (piece.location[0], piece.location[1])
-            pygame.draw.circle(screen, HIGHLIGHT_YELLOW, screen_pos, piece.radius + 5, 4)
+            pygame.draw.circle(screen, HIGHLIGHT_YELLOW, piece.location, piece.radius + 5, 4)
 
-        # Show valid moves for selected piece (small yellow dots)
+        # Valid moves for selected piece
         if selected_piece:
-            for (r, c) in valid_moves:
-                screen_pos = board_to_screen_pixel(r, c)  # Use screen coordinates with UI offset
+            for r, c in valid_moves:
+                screen_pos = board_to_screen_pixel(r, c)
                 pygame.draw.circle(screen, HIGHLIGHT_YELLOW, screen_pos, TILE_SIZE // 6)
 
-        # Green highlight for hovered piece
+        # Hover highlight
         if hover_piece and hover_piece not in forced_pieces:
-            screen_pos = (hover_piece.location[0], hover_piece.location[1])
-            pygame.draw.circle(screen, HIGHLIGHT_GREEN, screen_pos, hover_piece.radius + 5, 3)
+            pygame.draw.circle(screen, HIGHLIGHT_GREEN, hover_piece.location, hover_piece.radius + 5, 3)
 
-        # Red highlight for currently selected piece
+        # Selected piece highlight
         if selected_piece:
-            screen_pos = (selected_piece.location[0], selected_piece.location[1])  # Remove + UI_SPACE_HEIGHT
-            pygame.draw.circle(screen, HIGHLIGHT_RED, screen_pos, selected_piece.radius + 5, 3)
+            pygame.draw.circle(screen, HIGHLIGHT_RED, selected_piece.location, selected_piece.radius + 5, 3)
 
+        # Game over overlay
         if game_over:
             overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
             overlay.set_alpha(180)
             overlay.fill((0, 0, 0))
             screen.blit(overlay, (0, 0))
-
             game_over_text = font.render(f"Game over, {game_winner} wins!", True, (255, 255, 255))
-            screen.blit(game_over_text, (SCREEN_WIDTH // 2 - game_over_text.get_width() // 2,SCREEN_HEIGHT // 2 - game_over_text.get_height() // 2))
-    else:
-        close_button=draw_menu()
+            screen.blit(game_over_text,
+                        (SCREEN_WIDTH // 2 - game_over_text.get_width() // 2,
+                         SCREEN_HEIGHT // 2 - game_over_text.get_height() // 2))
 
+    pygame.display.flip()  # Update screen
 
-
-    # Update everything drawn to the window
-    pygame.display.flip()
 
 
 
