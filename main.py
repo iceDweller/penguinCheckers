@@ -1,6 +1,6 @@
 import pygame
 import time
-
+import random
 # Initialize Pygame so we can use all its built-in graphics functions
 pygame.init()
 
@@ -14,6 +14,10 @@ SCREEN_WIDTH = min(info.current_w-100,800)
 SCREEN_HEIGHT = min(info.current_h-100,800)+60
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.RESIZABLE) #add pygame.RESIZABLE if you want to mess with scaling (I do not right now)
 pygame.display.set_caption("Penguin Checkers")
+
+
+# Options for AI difficulty
+AI_DIFFICULTY = "HARD"  #"EASY" or "HARD"
 
 UI_SCALE = 1.0
 MENU_SCALE = 1.0
@@ -122,6 +126,74 @@ class Checker:
     def clicked(self, mouse_pos):
         """Return True if the mouse clicked on this piece."""
         return self.rect.collidepoint(mouse_pos)
+
+
+class easy_AI:
+    def __init__(self,color):
+        self.color = color
+
+    def pick_move(self):
+        moves = get_all_player_moves(self.color)
+
+        if not moves:
+            return None
+
+
+
+        piece, (r,c) = random.choice(moves)
+        return piece, (r,c)
+
+
+
+class hard_AI:
+    def __init__(self, color):
+        self.color = color
+
+    def pick_move(self):
+        moves = get_all_player_moves(self.color)
+        if not moves:
+            return None
+
+        scored_moves = []
+        for piece, (r, c) in moves:
+            score = self.evaluate_move(piece, r, c)
+            scored_moves.append((score, piece, (r, c)))
+
+        scored_moves.sort(reverse=True, key=lambda x: x[0])
+        _, piece, move = scored_moves[0]
+        return piece, move
+
+    def evaluate_move(self, piece, r, c):
+        sr, sc = pixel_to_board(piece.location)
+        dr = r - sr
+        score = 0
+
+        # Prefer advancing pieces toward promotion
+        if piece.player == BLACK:
+            score += dr
+        else:
+            score -= dr
+
+        # Promote to king
+        if piece.player == BLACK and r == ROWS - 1:
+            score += 10
+        elif piece.player == WHITE and r == 0:
+            score += 10
+
+        # Prefer jumps (captures)
+        if abs(dr) == 2:
+            score += 5
+
+        # Prefer center squares
+        if 2 <= r <= 5 and 2 <= c <= 5:
+            score += 1
+
+        # Small random factor for unpredictability
+        score += random.uniform(0, 0.5)
+
+        return score
+
+
 
 # -----------------------------
 # Helper Functions
@@ -406,6 +478,47 @@ def on_turn_end():
     save_game_state()
     # print(board_state)
 
+def logic_board():
+    board = [[None for _ in range(8)] for _ in range(8)]
+    for p in board_state:
+        r,c = pixel_to_board(p.location)
+        if p.king:
+            board[r][c]=("Wk" if p.player == WHITE else "Bk")
+        else:
+            board[r][c] = ("W" if p.player == WHITE else "B")
+
+
+def get_all_player_moves(player_color):
+    moves =[]
+    forced = get_forced_jump_pieces(player_color)
+
+    pieces = forced if forced else [p for p in board_state if p.player == player_color]
+    for p in pieces:
+        valid = get_valid_moves(p,only_jumps=bool(forced))
+        for(r,c) in valid:
+            moves.append((p,(r,c)))
+    return moves
+
+def apply_ai_move(ai):
+    global turn,selected_piece,valid_moves,jump_occurred,multi_jump
+    result =ai.pick_move()
+    if not result:
+        return
+    piece, (r,c) = result
+
+    sr, sc =pixel_to_board(piece.location)
+    dr, dc = r-sr,c-sc
+
+
+    if abs(dr) ==2:
+        jumped = piece_at(sr+dr//2,sc+dc//2)
+        if jumped:
+            board_state.remove(jumped)
+
+    piece.update_location(board_to_pixel(r,c))
+    sr2, sc2 =pixel_to_board(piece.location)
+    turn +=1
+    on_turn_end()
 
 # -----------------------------
 # Game Loop Setup
@@ -439,7 +552,7 @@ while running:
         # resize window (EXPERIMENTAL)
         if event.type == pygame.VIDEORESIZE:
             scale_window(event.size)
-            
+
         if not show_menu:
             # Hover highlight (shows green outline when cursor hovers over a piece)
             if event.type == pygame.MOUSEMOTION:
@@ -531,6 +644,15 @@ while running:
                         selected_piece.update_location(orig_pos)
                         selected_piece = None
                         valid_moves = []
+        if not dragging and not game_over:
+            if turn % 2 == 1:  # Black's turn (AI)
+                if AI_DIFFICULTY == "EASY":
+                    ai = easy_AI(BLACK)
+                else:
+                    ai = hard_AI(BLACK)
+                apply_ai_move(ai)
+
+
         # Handle menu events
         else:
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
