@@ -349,6 +349,7 @@ def scale_window(new_size):
     # Save old board info before resizing
     old_tile = TILE_SIZE
     old_offset_x = BOARD_OFFSET_X
+    old_ui_height =UI_SPACE_HEIGHT
 
     # Update screen size
     SCREEN_WIDTH, SCREEN_HEIGHT = new_size
@@ -376,16 +377,20 @@ def scale_window(new_size):
     # Update piece locations
     for piece in board_state:
         x, y = piece.location
+
         old_col = int((x - old_offset_x) // old_tile)
-        old_row = int((y - 60) // old_tile)  # original UI bar was 60 tall
+        old_row = int((y - old_ui_height) // old_tile)  # original UI bar was 60 tall
+
         if 0 <= old_row < ROWS and 0 <= old_col < ROWS:
             new_x = BOARD_OFFSET_X + old_col * TILE_SIZE + TILE_SIZE // 2
             new_y = UI_SPACE_HEIGHT + old_row * TILE_SIZE + TILE_SIZE // 2
+
             piece.location = (new_x, new_y)
             piece.radius = TILE_SIZE // 3
+
             piece.update_rect()
     
-        time.sleep(5)  # Pauses the program for 5 seconds
+
 
     #redraq immediately
     pygame.display.flip()
