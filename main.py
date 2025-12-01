@@ -104,6 +104,15 @@ if not os.path.exists("games"):
 # Tracks the algebraic move history of the current game
 move_history = []
 
+# -----------------------------
+# REPLAY SYSTEM STATE
+# -----------------------------
+replay_mode_active = False
+replay_file_select_active = False
+replay_moves = []
+replay_index = 0
+replay_total = 0
+replay_record = None
 
 # -----------------------------
 # Checker Class - represents one checker piece
@@ -488,6 +497,103 @@ def draw_login_screen():
 
     return btn, pygame.Rect(x, y_user, box_w, box_h), pygame.Rect(x, y_pass, box_w, box_h), pygame.Rect(x,360,300,40)
 
+def draw_replay_file_select():
+    screen.fill((30, 30, 30))
+    font_big = pygame.font.SysFont(None, 60)
+    font_small = pygame.font.SysFont(None, 36)
+
+    title = font_big.render("Select Replay File", True, (255,255,255))
+    screen.blit(title, (SCREEN_WIDTH//2 - title.get_width()//2, 40))
+
+    files = os.listdir("games")
+    json_files = [f for f in files if f.endswith(".json")]
+
+    buttons = []
+
+    y = 150
+    for f in json_files:
+        rect = pygame.Rect(100, y, SCREEN_WIDTH - 200, 50)
+        pygame.draw.rect(screen, (80,80,80), rect)
+        pygame.draw.rect(screen, (160,160,160), rect, 2)
+
+        screen.blit(font_small.render(f, True, (255,255,255)),
+                    (rect.x + 10, rect.y + 10))
+        buttons.append((rect, f))
+        y += 70
+
+    return buttons
+
+
+def load_replay_file(filename):
+    global replay_moves, replay_index, replay_total, replay_record
+
+    with open("games/" + filename, "r") as f:
+        replay_record = json.load(f)
+
+    replay_moves = replay_record["moves"]
+    replay_index = 0
+    replay_total = len(replay_moves)
+
+def apply_replay_move(move):
+    # ex: "c3-d4" or "e5xf4"
+    is_jump = "x" in move
+    parts = move.replace("x","-").split("-")
+
+    start = parts[0]
+    end = parts[1]
+
+    start_col = ord(start[0]) - ord('a')
+    start_row = 8 - int(start[1])
+
+    end_col = ord(end[0]) - ord('a')
+    end_row = 8 - int(end[1])
+
+    piece = piece_at(start_row, start_col)
+    if not piece:
+        return
+
+    # handle capture
+    if is_jump:
+        mid_r = (start_row + end_row) // 2
+        mid_c = (start_col + end_col) // 2
+        jumped_piece = piece_at(mid_r, mid_c)
+        if jumped_piece:
+            board_state.remove(jumped_piece)
+
+    # move piece
+    piece.update_location(board_to_pixel(end_row, end_col))
+
+def reset_board_for_replay():
+    create_starting_pieces()   # creates normal initial setup
+
+    # Now apply moves up to replay_index
+    for i in range(replay_index):
+        apply_replay_move(replay_moves[i])
+
+def draw_replay_controls():
+    font = pygame.font.SysFont(None, 36)
+
+    btn_prev = pygame.Rect(50, SCREEN_HEIGHT - 80, 100, 50)
+    btn_next = pygame.Rect(200, SCREEN_HEIGHT - 80, 100, 50)
+    btn_restart = pygame.Rect(350, SCREEN_HEIGHT - 80, 150, 50)
+    btn_exit = pygame.Rect(550, SCREEN_HEIGHT - 80, 100, 50)
+
+    pygame.draw.rect(screen, (100,100,200), btn_prev)
+    pygame.draw.rect(screen, (100,100,200), btn_next)
+    pygame.draw.rect(screen, (200,100,100), btn_restart)
+    pygame.draw.rect(screen, (200,50,50), btn_exit)
+
+    screen.blit(font.render("Prev", True, (255,255,255)),
+                (btn_prev.x+20, btn_prev.y+10))
+    screen.blit(font.render("Next", True, (255,255,255)),
+                (btn_next.x+20, btn_next.y+10))
+    screen.blit(font.render("Restart", True, (255,255,255)),
+                (btn_restart.x+20, btn_restart.y+10))
+    screen.blit(font.render("Exit", True, (255,255,255)),
+                (btn_exit.x+20, btn_exit.y+10))
+
+    return btn_prev, btn_next, btn_restart, btn_exit
+
 
 def draw_menu():
     global menu_buttons
@@ -531,37 +637,41 @@ def draw_menu():
     menu_buttons["hard"] = hard_button
 
 def draw_ui_buttons():
-    # Draw UI bar background
-    pygame.draw.rect(screen, (50, 50, 50), (0, 0, SCREEN_WIDTH, UI_SPACE_HEIGHT))
-    pygame.draw.rect(screen, (100, 100, 100), (0, 0, SCREEN_WIDTH, UI_SPACE_HEIGHT), 4)
-
-    font_size = int(36 * UI_SCALE)
-    ui_font = pygame.font.SysFont(None, font_size)
-
-    # Draw turn indicator
-    turn_text = ui_font.render(f"Turn: {'White' if turn % 2 == 0 else 'Black'}", True, (255, 255, 255))
-    screen.blit(turn_text, (10 * UI_SCALE, 10 * UI_SCALE))
+    button_w = 120
+    button_h = 50
+    padding = 20
 
     # Menu button
-    button_w = int(100 * UI_SCALE)
-    button_h = int(40 * UI_SCALE)
-    padding = int(10 * UI_SCALE)
-    menu_button = pygame.Rect(SCREEN_WIDTH - (button_w * 2 + padding * 2), padding, button_w, button_h)
-    reset_button = pygame.Rect(SCREEN_WIDTH - (button_w + padding), padding, button_w, button_h)
+    menu_button = pygame.Rect(padding, padding, button_w, button_h)
 
-    # Menu button visuals
+    # Reset button
+    reset_button = pygame.Rect(padding*2 + button_w, padding, button_w, button_h)
+
+    # Replay button (added)
+    replay_button = pygame.Rect(padding*3 + button_w*2, padding, button_w, button_h)
+
+    # Menu button
     pygame.draw.rect(screen, (50, 50, 150), menu_button)
     pygame.draw.rect(screen, (100, 100, 200), menu_button, 2)
-    menu_text = ui_font.render("Menu", True, (255, 255, 255))
-    screen.blit(menu_text, (menu_button.centerx - menu_text.get_width() // 2, menu_button.centery - menu_text.get_height() // 2))
+    menu_text = font.render("Menu", True, (255,255,255))
+    screen.blit(menu_text, (menu_button.centerx - menu_text.get_width()//2,
+                            menu_button.centery - menu_text.get_height()//2))
 
-    # Reset button visuals
+    # Reset button
     pygame.draw.rect(screen, (150, 50, 50), reset_button)
     pygame.draw.rect(screen, (200, 100, 100), reset_button, 2)
-    reset_text = ui_font.render("Reset", True, (255, 255, 255))
-    screen.blit(reset_text, (reset_button.centerx - reset_text.get_width() // 2, reset_button.centery - reset_text.get_height() // 2))
+    reset_text = font.render("Reset", True, (255,255,255))
+    screen.blit(reset_text, (reset_button.centerx - reset_text.get_width()//2,
+                             reset_button.centery - reset_text.get_height()//2))
 
-    return menu_button, reset_button
+    # Replay button
+    pygame.draw.rect(screen, (50, 150, 50), replay_button)
+    pygame.draw.rect(screen, (100, 200, 100), replay_button, 2)
+    replay_text = font.render("Replay", True, (255,255,255))
+    screen.blit(replay_text, (replay_button.centerx - replay_text.get_width()//2,
+                              replay_button.centery - replay_text.get_height()//2))
+
+    return menu_button, reset_button, replay_button
 
 
 def scale_window(new_size):
@@ -757,13 +867,18 @@ font = pygame.font.SysFont(None, 36)  # Font for text display
 # -----------------------------
 running = True
 
+# -----------------------------
+# Main Game Loop (Unified)
+# -----------------------------
+running = True
+
 while running:
     clock.tick(60)
     mouse_pos = pygame.mouse.get_pos()
 
-    # =============================
-    #  LOGIN SCREEN MODE
-    # =============================
+    # ======================================================================
+    # 1. LOGIN SYSTEM (PLAYER 1 -> PLAYER 2)
+    # ======================================================================
     if login_screen_active:
         submit_btn, user_box, pass_box, switch_box = draw_login_screen()
 
@@ -772,26 +887,25 @@ while running:
                 running = False
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                # clicking username input box
+
                 if user_box.collidepoint(event.pos):
                     input_active = "username"
 
-                # clicking password input box
                 elif pass_box.collidepoint(event.pos):
                     input_active = "password"
 
-                # switch login/register mode
                 elif switch_box.collidepoint(event.pos):
                     register_mode = not register_mode
                     login_message = ""
 
-                # submit button
                 elif submit_btn.collidepoint(event.pos):
+
                     if register_mode:
                         ok, msg = register_user(login_username, login_password)
                         login_message = msg
                         if ok:
-                            register_mode = False  # switch to login after success
+                            register_mode = False
+
                     else:
                         ok, msg = verify_login(login_username, login_password)
                         login_message = msg
@@ -800,36 +914,28 @@ while running:
                                 player1_user = login_username
                                 login_username = ""
                                 login_password = ""
-                                login_message = ""
-                                login_stage = "P2"  # move to second login
+                                login_stage = "P2"
 
                             elif login_stage == "P2":
                                 player2_user = login_username
                                 login_username = ""
                                 login_password = ""
-                                login_message = ""
                                 login_stage = "DONE"
-                                login_screen_active = False  # NOW BOTH ARE LOGGED IN
-
+                                login_screen_active = False
 
             elif event.type == pygame.KEYDOWN:
                 if input_active == "username":
-                    if event.key == pygame.K_BACKSPACE:
-                        login_username = login_username[:-1]
-                    else:
-                        login_username += event.unicode
+                    login_username = login_username[:-1] if event.key == pygame.K_BACKSPACE else login_username + event.unicode
                 elif input_active == "password":
-                    if event.key == pygame.K_BACKSPACE:
-                        login_password = login_password[:-1]
-                    else:
-                        login_password += event.unicode
+                    login_password = login_password[:-1] if event.key == pygame.K_BACKSPACE else login_password + event.unicode
 
         draw_login_screen()
         pygame.display.flip()
         continue
-    # =============================
-    # MODE SELECT SCREEN
-    # =============================
+
+    # ======================================================================
+    # 2. MODE SELECT SCREEN
+    # ======================================================================
     if mode_select_active:
         btn_pvp, btn_easy, btn_hard = draw_mode_select()
 
@@ -841,11 +947,13 @@ while running:
                 if btn_pvp.collidepoint(event.pos):
                     game_mode = "PVP"
                     mode_select_active = False
+
                 elif btn_easy.collidepoint(event.pos):
                     game_mode = "AI_EASY"
                     AI_DIFFICULTY = "EASY"
                     player2_user = "AI_Bot"
                     mode_select_active = False
+
                 elif btn_hard.collidepoint(event.pos):
                     game_mode = "AI_HARD"
                     AI_DIFFICULTY = "HARD"
@@ -856,9 +964,67 @@ while running:
         pygame.display.flip()
         continue
 
-    # =============================
-    #  MAIN GAME (normal loop)
-    # =============================
+    # ======================================================================
+    # 3. REPLAY FILE SELECT MODE
+    # ======================================================================
+    if replay_file_select_active:
+        file_buttons = draw_replay_file_select()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                for rect, fname in file_buttons:
+                    if rect.collidepoint(event.pos):
+                        load_replay_file(fname)
+                        replay_mode_active = True
+                        replay_file_select_active = False
+                        reset_board_for_replay()
+
+        pygame.display.flip()
+        continue
+
+    # ======================================================================
+    # 4. REPLAY MODE (Step-by-step viewer)
+    # ======================================================================
+    if replay_mode_active:
+        btn_prev, btn_next, btn_restart, btn_exit = draw_replay_controls()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if btn_prev.collidepoint(event.pos):
+                    if replay_index > 0:
+                        replay_index -= 1
+                        reset_board_for_replay()
+
+                elif btn_next.collidepoint(event.pos):
+                    if replay_index < replay_total:
+                        apply_replay_move(replay_moves[replay_index])
+                        replay_index += 1
+
+                elif btn_restart.collidepoint(event.pos):
+                    replay_index = 0
+                    reset_board_for_replay()
+
+                elif btn_exit.collidepoint(event.pos):
+                    replay_mode_active = False
+                    reset_game()
+                    break
+
+        screen.fill((0,0,0))
+        draw_board()
+        draw_all_pieces()
+        draw_replay_controls()
+        pygame.display.flip()
+        continue
+
+    # ======================================================================
+    # 5. NORMAL GAMEPLAY (dragging, moves, AI, rendering)
+    # ======================================================================
 
     row, col = pixel_to_board(mouse_pos)
 
@@ -867,44 +1033,56 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-        # window resizing
+        # Window resizing
         if event.type == pygame.VIDEORESIZE:
             scale_window(event.size)
 
-        # ============ MENU MODE =============
+        # -------------------------------------
+        # SETTINGS MENU
+        # -------------------------------------
         if show_menu:
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if menu_buttons["close"] and menu_buttons["close"].collidepoint(mouse_pos):
+                if menu_buttons["close"].collidepoint(mouse_pos):
                     show_menu = False
-                elif menu_buttons["easy"] and menu_buttons["easy"].collidepoint(mouse_pos):
+                elif menu_buttons["easy"].collidepoint(mouse_pos):
                     AI_DIFFICULTY = "EASY"
-                elif menu_buttons["hard"] and menu_buttons["hard"].collidepoint(mouse_pos):
+                elif menu_buttons["hard"].collidepoint(mouse_pos):
                     AI_DIFFICULTY = "HARD"
             continue
 
-        # ============ IN-GAME EVENTS =============
+        # -------------------------------------
+        # UI BUTTONS (Menu, Reset, Replay)
+        # -------------------------------------
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            menu_button, reset_button = draw_ui_buttons()
+            menu_button, reset_button, replay_button = draw_ui_buttons()
 
-            # click menu
+            if replay_button.collidepoint(mouse_pos):
+                replay_file_select_active = True
+                break
+
             if menu_button.collidepoint(mouse_pos):
                 show_menu = True
                 break
 
-            # click reset
             elif reset_button.collidepoint(mouse_pos):
                 reset_game()
                 break
 
-            # piece selection
+            # -------------------------------------
+            # PIECE SELECTION
+            # -------------------------------------
             if not selected_piece and not game_over:
+
                 for piece in board_state:
                     if piece.clicked(mouse_pos) and piece.player == get_current_turn():
-                        forced_pieces = get_forced_jump_pieces(get_current_turn())
-                        if forced_pieces and piece not in forced_pieces:
+
+                        forced = get_forced_jump_pieces(get_current_turn())
+                        if forced and piece not in forced:
                             continue
-                        only_jumps = bool(forced_pieces) or jump_occurred
-                        moves = get_valid_moves(piece, only_jumps=only_jumps)
+
+                        only_jumps = bool(forced) or jump_occurred
+                        moves = get_valid_moves(piece, only_jumps)
+
                         if moves:
                             selected_piece = piece
                             valid_moves = moves
@@ -912,35 +1090,40 @@ while running:
                             orig_pos = piece.location
                             break
 
-        # dragging piece
+        # -------------------------------------
+        # DRAGGING
+        # -------------------------------------
         if event.type == pygame.MOUSEMOTION and dragging and selected_piece:
             mx, my = mouse_pos
             selected_piece.update_location((mx, my))
 
-        # dropping piece
+        # -------------------------------------
+        # DROP PIECE / APPLY MOVE
+        # -------------------------------------
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and dragging:
             dragging = False
+
             if selected_piece:
                 row, col = pixel_to_board(mouse_pos)
                 sr, sc = pixel_to_board(orig_pos)
                 dr, dc = row - sr, col - sc
 
                 if (row, col) in valid_moves:
-                    sr, sc = pixel_to_board(orig_pos)
-                    is_jump = abs(dr) == 2
 
                     # record algebraic move
+                    is_jump = abs(dr) == 2
                     move_history.append(algebraic_move(sr, sc, row, col, is_jump))
 
-                    # jump
-                    if abs(dr) == 2:
-                        jumped = piece_at(sr + dr // 2, sc + dc // 2)
+                    # JUMP
+                    if is_jump:
+                        jumped = piece_at(sr + dr//2, sc + dc//2)
                         if jumped:
                             board_state.remove(jumped)
+
                         selected_piece.update_location(board_to_pixel(row, col))
 
                         jump_occurred = True
-                        multi_jump = get_valid_moves(selected_piece, only_jumps=True)
+                        multi_jump = get_valid_moves(selected_piece, True)
 
                         if multi_jump:
                             valid_moves = multi_jump
@@ -953,8 +1136,9 @@ while running:
                             jump_occurred = False
                             turn += 1
                             on_turn_end()
+
+                    # NORMAL MOVE
                     else:
-                        # normal move
                         if jump_occurred:
                             selected_piece.update_location(orig_pos)
                         else:
@@ -963,21 +1147,23 @@ while running:
                             valid_moves = []
                             turn += 1
                             on_turn_end()
+
                 else:
                     selected_piece.update_location(orig_pos)
                     selected_piece = None
                     valid_moves = []
-        # AI only acts in AI modes
-        if not dragging and not game_over:
-            if game_mode in ("AI_EASY", "AI_HARD") and turn % 2 == 1:  # Black's turn
-                ai = easy_AI(BLACK) if game_mode == "AI_EASY" else hard_AI(BLACK)
-                apply_ai_move(ai)
 
-    # =============================
-    # DRAW EVERYTHING
-    # =============================
+        # -------------------------------------
+        # AI TURN (only in AI modes)
+        # -------------------------------------
+        if game_mode in ("AI_EASY", "AI_HARD") and not dragging and not game_over and turn % 2 == 1:
+            ai = easy_AI(BLACK) if game_mode == "AI_EASY" else hard_AI(BLACK)
+            apply_ai_move(ai)
 
-    screen.fill((0, 0, 0))
+    # ======================================================================
+    # 6. DRAW EVERYTHING
+    # ======================================================================
+    screen.fill((0,0,0))
 
     draw_ui_buttons()
     draw_ai_difficulty()
@@ -994,17 +1180,20 @@ while running:
 
         if selected_piece:
             for r, c in valid_moves:
-                pygame.draw.circle(screen, HIGHLIGHT_YELLOW, board_to_screen_pixel(r, c), TILE_SIZE // 6)
+                pygame.draw.circle(screen, HIGHLIGHT_YELLOW, board_to_screen_pixel(r, c), TILE_SIZE//6)
 
         if selected_piece:
             pygame.draw.circle(screen, HIGHLIGHT_RED, selected_piece.location, selected_piece.radius + 5, 3)
 
         if game_over:
+            save_game_record()
+
             overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
             overlay.set_alpha(180)
-            overlay.fill((0, 0, 0))
-            screen.blit(overlay, (0, 0))
-            game_over_text = font.render(f"Game over, {game_winner} wins!", True, (255, 255, 255))
+            overlay.fill((0,0,0))
+            screen.blit(overlay, (0,0))
+
+            game_over_text = font.render(f"Game over, {game_winner} wins!", True, (255,255,255))
             screen.blit(game_over_text,
                         (SCREEN_WIDTH//2 - game_over_text.get_width()//2,
                          SCREEN_HEIGHT//2 - game_over_text.get_height()//2))
@@ -1012,4 +1201,3 @@ while running:
     pygame.display.flip()
 
 pygame.quit()
-
