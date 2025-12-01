@@ -88,6 +88,11 @@ login_password = ""
 login_message = ""
 input_active = None  # "username" or "password"
 
+# Game mode system
+game_mode = None   # "PVP", "AI_EASY", "AI_HARD"
+mode_select_active = True
+
+
 
 # -----------------------------
 # Checker Class - represents one checker piece
@@ -275,6 +280,39 @@ def create_starting_pieces():
             # White pieces occupy the bottom 3 rows
             elif r > 4:
                 board_state.append(Checker((x, y), "normal", WHITE))
+
+
+def draw_mode_select():
+    screen.fill((40, 40, 40))
+    font_big = pygame.font.SysFont(None, 60)
+    font_small = pygame.font.SysFont(None, 36)
+
+    title = font_big.render("Select Game Mode", True, (255,255,255))
+    screen.blit(title, (SCREEN_WIDTH//2 - title.get_width()//2, 60))
+
+    btn_w, btn_h = 300, 60
+    x = SCREEN_WIDTH//2 - btn_w//2
+
+    btn1 = pygame.Rect(x, 180, btn_w, btn_h)
+    btn2 = pygame.Rect(x, 260, btn_w, btn_h)
+    btn3 = pygame.Rect(x, 340, btn_w, btn_h)
+
+    pygame.draw.rect(screen, (80,80,200), btn1)
+    pygame.draw.rect(screen, (80,200,80), btn2)
+    pygame.draw.rect(screen, (200,80,80), btn3)
+
+    screen.blit(font_small.render("Human vs Human", True, (255,255,255)),
+                (btn1.centerx - 120, btn1.centery - 15))
+
+    screen.blit(font_small.render("Human vs AI (Easy)", True, (255,255,255)),
+                (btn2.centerx - 130, btn2.centery - 15))
+
+    screen.blit(font_small.render("Human vs AI (Hard)", True, (255,255,255)),
+                (btn3.centerx - 130, btn3.centery - 15))
+
+    return btn1, btn2, btn3
+
+
 
 def draw_board():
     for row in range(ROWS):
@@ -727,6 +765,32 @@ while running:
         draw_login_screen()
         pygame.display.flip()
         continue
+    # =============================
+    # MODE SELECT SCREEN
+    # =============================
+    if mode_select_active:
+        btn_pvp, btn_easy, btn_hard = draw_mode_select()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if btn_pvp.collidepoint(event.pos):
+                    game_mode = "PVP"
+                    mode_select_active = False
+                elif btn_easy.collidepoint(event.pos):
+                    game_mode = "AI_EASY"
+                    AI_DIFFICULTY = "EASY"
+                    mode_select_active = False
+                elif btn_hard.collidepoint(event.pos):
+                    game_mode = "AI_HARD"
+                    AI_DIFFICULTY = "HARD"
+                    mode_select_active = False
+
+        draw_mode_select()
+        pygame.display.flip()
+        continue
 
     # =============================
     #  MAIN GAME (normal loop)
@@ -833,14 +897,11 @@ while running:
                     selected_piece.update_location(orig_pos)
                     selected_piece = None
                     valid_moves = []
-
-        # AI turn
-        if not dragging and not game_over and turn % 2 == 1:
-            if AI_DIFFICULTY == "EASY":
-                ai = easy_AI(BLACK)
-            else:
-                ai = hard_AI(BLACK)
-            apply_ai_move(ai)
+        # AI only acts in AI modes
+        if not dragging and not game_over:
+            if game_mode in ("AI_EASY", "AI_HARD") and turn % 2 == 1:  # Black's turn
+                ai = easy_AI(BLACK) if game_mode == "AI_EASY" else hard_AI(BLACK)
+                apply_ai_move(ai)
 
     # =============================
     # DRAW EVERYTHING
