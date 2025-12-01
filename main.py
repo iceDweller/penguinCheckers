@@ -4,7 +4,7 @@ import random
 import json
 import hashlib
 import os
-
+import datetime
 
 # Initialize Pygame so we can use all its built-in graphics functions
 pygame.init()
@@ -87,11 +87,22 @@ login_username = ""
 login_password = ""
 login_message = ""
 input_active = None  # "username" or "password"
+# Two-player login system
+login_stage = "P1"   # or "P2" or "DONE"
+player1_user = None   # White
+player2_user = None   # Black
+
 
 # Game mode system
 game_mode = None   # "PVP", "AI_EASY", "AI_HARD"
 mode_select_active = True
 
+# Game record directory
+if not os.path.exists("games"):
+    os.makedirs("games")
+
+# Tracks the algebraic move history of the current game
+move_history = []
 
 
 # -----------------------------
@@ -216,6 +227,18 @@ class hard_AI:
 
         return score
 
+
+# -----------------------------
+# Algebraic Notation Helpers
+# -----------------------------
+def to_algebraic(row, col):
+    # Columns a–h, rows 1–8
+    return chr(ord('a') + col) + str(8 - row)
+
+def algebraic_move(start_r, start_c, end_r, end_c, is_jump):
+    start = to_algebraic(start_r, start_c)
+    end = to_algebraic(end_r, end_c)
+    return f"{start}x{end}" if is_jump else f"{start}-{end}"
 
 
 # -----------------------------
@@ -382,6 +405,9 @@ def reset_game():
     game_over = False
     game_winner = None
     board_history = []
+    global move_history
+    move_history = []
+
 
 def check_game_over():
     global game_over, game_winner
@@ -393,10 +419,13 @@ def check_game_over():
     if len(white_pieces) == 0:
         game_over = True
         game_winner = "BLACK"
+
         return True
     if len(black_pieces) == 0:
         game_over = True
         game_winner = "WHITE"
+        save_game_record()
+
         return True
 
     current_player_pieces = [p for p in board_state if p.player == get_current_turn()]
@@ -420,7 +449,9 @@ def draw_login_screen():
     font_big = pygame.font.SysFont(None, 60)
     font_small = pygame.font.SysFont(None, 36)
 
-    title = "Register" if register_mode else "Login"
+    player_title = "Player 1 Login" if login_stage == "P1" else "Player 2 Login"
+    title = player_title if not register_mode else "Register New Account"
+
     title_surface = font_big.render(title, True, (255, 255, 255))
     screen.blit(title_surface, (SCREEN_WIDTH//2 - title_surface.get_width()//2, 50))
 
@@ -676,6 +707,24 @@ def verify_login(username, password):
         return False, "Incorrect password."
     return True, "Login successful!"
 
+def save_game_record():
+    if not move_history:
+        return
+
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"games/{current_user}_{timestamp}.json"
+
+    record = {
+        "white_player": player1_user,
+        "black_player": player2_user,
+        "timestamp": timestamp,
+        "moves": move_history
+    }
+
+    with open(filename, "w") as f:
+        json.dump(record, f, indent=4)
+
+    print(f"Game saved to {filename}")
 
 
 
@@ -747,8 +796,21 @@ while running:
                         ok, msg = verify_login(login_username, login_password)
                         login_message = msg
                         if ok:
-                            current_user = login_username
-                            login_screen_active = False  # ENTER GAME
+                            if login_stage == "P1":
+                                player1_user = login_username
+                                login_username = ""
+                                login_password = ""
+                                login_message = ""
+                                login_stage = "P2"  # move to second login
+
+                            elif login_stage == "P2":
+                                player2_user = login_username
+                                login_username = ""
+                                login_password = ""
+                                login_message = ""
+                                login_stage = "DONE"
+                                login_screen_active = False  # NOW BOTH ARE LOGGED IN
+
 
             elif event.type == pygame.KEYDOWN:
                 if input_active == "username":
@@ -782,10 +844,12 @@ while running:
                 elif btn_easy.collidepoint(event.pos):
                     game_mode = "AI_EASY"
                     AI_DIFFICULTY = "EASY"
+                    player2_user = "AI_Bot"
                     mode_select_active = False
                 elif btn_hard.collidepoint(event.pos):
                     game_mode = "AI_HARD"
                     AI_DIFFICULTY = "HARD"
+                    player2_user = "AI_Bot"
                     mode_select_active = False
 
         draw_mode_select()
@@ -862,6 +926,12 @@ while running:
                 dr, dc = row - sr, col - sc
 
                 if (row, col) in valid_moves:
+                    sr, sc = pixel_to_board(orig_pos)
+                    is_jump = abs(dr) == 2
+
+                    # record algebraic move
+                    move_history.append(algebraic_move(sr, sc, row, col, is_jump))
+
                     # jump
                     if abs(dr) == 2:
                         jumped = piece_at(sr + dr // 2, sc + dc // 2)
