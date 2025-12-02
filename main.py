@@ -6,6 +6,7 @@ import json
 import hashlib
 import os
 import datetime
+import sqlite3
 
 pygame.init()
 
@@ -89,42 +90,87 @@ menu_buttons = {
 }
 
 ################################################
-# USER ACCOUNT SYSTEM
+# USER ACCOUNT SYSTEM (SQLite)
 ################################################
-USERS_FILE = "users.json"
+
+DB_FILE = "users.db"
+
 current_user = None
 player1_user = None
 player2_user = None
 
-def load_users():
-    if not os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "w") as f:
-            json.dump({}, f)
-    with open(USERS_FILE, "r") as f:
-        return json.load(f)
+def init_db():
+    """Create the users table if it doesn't exist."""
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            username      TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-def save_users(users):
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f, indent=4)
 
-def hash_password(pw):
+def hash_password(pw: str) -> str:
+    """Return a SHA-256 hash of the password."""
     return hashlib.sha256(pw.encode()).hexdigest()
 
-def register_user(username, password):
-    users = load_users()
-    if username in users:
+
+def register_user(username: str, password: str):
+    """
+    Register a new user in the SQLite DB.
+    Returns (ok: bool, message: str)
+    """
+    if not username or not password:
+        return False, "Username and password are required."
+
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+
+    # Check if username already exists
+    cur.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+    if cur.fetchone():
+        conn.close()
         return False, "Username already exists."
-    users[username] = hash_password(password)
-    save_users(users)
+
+    # Insert new user
+    cur.execute(
+        "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+        (username, hash_password(password))
+    )
+    conn.commit()
+    conn.close()
     return True, "Registration successful!"
 
-def verify_login(username, password):
-    users = load_users()
-    if username not in users:
+
+def verify_login(username: str, password: str):
+    """
+    Verify credentials against the SQLite DB.
+    Returns (ok: bool, message: str)
+    """
+    if not username or not password:
+        return False, "Username and password are required."
+
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("SELECT password_hash FROM users WHERE username = ?", (username,))
+    row = cur.fetchone()
+    conn.close()
+
+    if row is None:
         return False, "User does not exist."
-    if users[username] != hash_password(password):
+
+    if row[0] != hash_password(password):
         return False, "Incorrect password."
+
     return True, "Login successful!"
+
+
+# Ensure the database exists when the module is imported
+init_db()
+
 
 ################################################
 # LOGIN SCREEN STATE
@@ -292,11 +338,12 @@ class Checker:
 def reset_game():
     global board_state, board_history, selected_piece, valid_moves
     global dragging, orig_pos, multi_jump, jump_occurred, turn
-    global game_over, game_winner, move_history
+    global game_over, game_winner, move_history, game_moves
 
     board_state = []
     board_history = []
     move_history = []
+    game_moves = []
     turn = 0
     selected_piece = None
     valid_moves = []
@@ -332,26 +379,46 @@ def reset_game():
 ################################################
 
 def save_game_record():
+    global game_moves, game_winner
+    global player1_user, player2_user, HUMAN_COLOR, pending_mode
+
     if not game_moves:
         return
 
-    # ensure file exists
-    if not os.path.exists("replays.json"):
-        with open("replays.json", "w") as f:
-            json.dump({"games": []}, f)
+    # --- Decide who is white / black for the replay label ---
+    if pending_mode == "pvp":
+        # In Human vs Human, just treat Player 1 as White and Player 2 as Black
+        white_player = player1_user or "Player 1"
+        black_player = player2_user or "Player 2"
+    else:
+        # Human vs AI
+        if HUMAN_COLOR == WHITE:
+            white_player = player1_user or "Human"
+            black_player = "AI"
+        else:
+            white_player = "AI"
+            black_player = player1_user or "Human"
 
     record = {
         "players": {
-            "white": current_user if HUMAN_COLOR == WHITE else "AI",
-            "black": current_user if HUMAN_COLOR == BLACK else "AI",
+            "white": white_player,
+            "black": black_player,
         },
         "moves": game_moves,
         "winner": game_winner,
         "timestamp": time.time()
     }
 
-    with open("replays.json", "r") as f:
-        data = json.load(f)
+    # --- Make sure file exists and is valid JSON ---
+    if not os.path.exists("replays.json"):
+        with open("replays.json", "w") as f:
+            json.dump({"games": []}, f)
+
+    try:
+        with open("replays.json", "r") as f:
+            data = json.load(f)
+    except Exception:
+        data = {"games": []}
 
     if "games" not in data:
         data["games"] = []
@@ -360,19 +427,6 @@ def save_game_record():
 
     with open("replays.json", "w") as f:
         json.dump(data, f, indent=4)
-
-def load_replay_file(path):
-    global replay_moves, replay_index, replay_total, replay_mode_active, board_state
-
-    with open(path, "r") as f:
-        data = json.load(f)
-
-    replay_moves = data.get("moves", [])
-    replay_index = 0
-    replay_total = len(replay_moves)
-    replay_mode_active = True
-
-    reset_game()
 
 def apply_replay_move():
     global replay_index, board_state, turn
@@ -443,85 +497,6 @@ def get_all_player_moves(player_color):
             moves.append((p, (r, c)))
     return moves
 
-class easy_AI:
-    def __init__(self, color):
-        self.color = color
-
-    def pick_move(self):
-        options = get_all_player_moves(self.color)
-        if not options:
-            return None
-        return random.choice(options)
-
-class hard_AI:
-    def __init__(self, color):
-        self.color = color
-
-    def evaluate_board(self):
-        score = 0
-        for p in board_state:
-            if p.player == self.color:
-                score += 3 if p.king else 1
-            else:
-                score -= 3 if p.king else 1
-        return score
-
-    def pick_move(self):
-        best_score = -9999
-        best_move = None
-
-        moves = get_all_player_moves(self.color)
-        if not moves:
-            return None
-
-        for piece, (r, c) in moves:
-            sr, sc = pixel_to_board(piece.location)
-            temp_jumped = None
-
-            if abs(r - sr) == 2:
-                temp_jumped = piece_at((sr + r)//2, (sc + c)//2)
-                if temp_jumped:
-                    board_state.remove(temp_jumped)
-
-            old_pos = piece.location
-            piece.update_location(board_to_pixel(r, c))
-
-            score = self.evaluate_board()
-
-            piece.update_location(old_pos)
-            if temp_jumped:
-                board_state.append(temp_jumped)
-
-            if score > best_score:
-                best_score = score
-                best_move = (piece, (r, c))
-
-        return best_move
-
-def apply_ai_move(ai):
-    global selected_piece, valid_moves, turn
-
-    move = ai.pick_move()
-    if not move:
-        return
-
-    piece, (r, c) = move
-    sr, sc = pixel_to_board(piece.location)
-
-    execute_move(piece, sr, sc, r, c)
-
-
-    if abs(r - sr) == 2:
-        jumped = piece_at((sr + r)//2, (sc + c)//2)
-        if jumped:
-            board_state.remove(jumped)
-
-    piece.update_location(board_to_pixel(r, c))
-
-    record_move(piece, sr, sc, r, c, abs(r - sr) == 2)
-
-    turn += 1
-    on_turn_end()
 
 ################################################
 # HELPER FUNCTIONS
@@ -688,24 +663,33 @@ def logic_board():
     return board
 
 ################################################
-# MOVEMENT EXECUTION (Merged B + A logging)
+# MOVEMENT EXECUTION
 ################################################
 
 def execute_move(piece, sr, sc, dr, dc):
+    """
+    Move `piece` from (sr, sc) to (dr, dc), handle captures, log move,
+    and advance the turn. Used by both human and AI moves.
+
+    Returns:
+        "continue" if a jump was made and more jumps are available
+        "done"     if the turn has ended
+    """
     global selected_piece, valid_moves, jump_occurred, multi_jump, turn
 
+    # is this a jump?
     is_jump = abs(dr - sr) == 2
 
     # Handle capture
     if is_jump:
         jumped = piece_at((sr + dr) // 2, (sc + dc) // 2)
-        if jumped:
+        if jumped and jumped in board_state:
             board_state.remove(jumped)
 
-    # Move piece to destination
+    # Move the piece
     piece.update_location(board_to_pixel(dr, dc))
 
-    # Log move in algebraic / replay format
+    # Log move
     record_move(piece, sr, sc, dr, dc, is_jump)
 
     # Multi-jump logic
@@ -713,14 +697,16 @@ def execute_move(piece, sr, sc, dr, dc):
     multi_jump = []
 
     if is_jump:
+        # Only consider further jumps with this same piece
         multi_jump = get_valid_moves(piece, only_jumps=True)
 
     if multi_jump:
-        # There are additional jumps with the same piece
-        # Keep turn with same player; let UI re-select this piece
+        # still same player's turn; keep using this piece
+        selected_piece = piece
+        valid_moves = multi_jump
         return "continue"
 
-    # Turn finishes
+    # End of turn
     selected_piece = None
     valid_moves = []
     jump_occurred = False
@@ -744,23 +730,9 @@ def handle_drop(selected_piece, mouse_pos):
         selected_piece.update_location(orig_pos)
         return "invalid"
 
-    result = execute_move(selected_piece, row, col)
+    result = execute_move(selected_piece, sr, sc, dr, dc)
     return result
 
-################################################
-# ALL MOVES FOR CURRENT PLAYER
-################################################
-
-def get_all_player_moves(player_color):
-    forced = get_forced_jump_pieces(player_color)
-    pieces = forced if forced else [p for p in board_state if p.player == player_color]
-
-    moves = []
-    for p in pieces:
-        valid = get_valid_moves(p, only_jumps=bool(forced))
-        for dest in valid:
-            moves.append((p, dest))
-    return moves
 
 ################################################
 # EASY AI
@@ -836,16 +808,31 @@ class hard_AI:
 # AI TURN EXECUTION
 ################################################
 
-def apply_ai_move(ai):
-    global selected_piece, valid_moves, turn
 
+def apply_ai_move(ai):
+    global selected_piece, valid_moves
+
+    # First chosen move for this turn
     move = ai.pick_move()
     if not move:
         return
 
     piece, (r, c) = move
+    sr, sc = pixel_to_board(piece.location)
 
-    execute_move(piece, r, c)
+    status = execute_move(piece, sr, sc, r, c)
+
+    # If this started a jump chain, keep jumping automatically
+    while status == "continue" and not game_over:
+        if not selected_piece or not valid_moves:
+            break
+
+        # Simple choice: randomly pick next jump landing square
+        # (we could make this smarter later)
+        next_r, next_c = random.choice(valid_moves)
+        sr2, sc2 = pixel_to_board(selected_piece.location)
+        status = execute_move(selected_piece, sr2, sc2, next_r, next_c)
+
 
 ################################################
 # MOVE LOGGING
@@ -889,36 +876,11 @@ def snapshot_board():
     return snap
 
 ################################################
-# REPLAY SAVE
-################################################
-
-def save_game_record():
-    if not game_moves:
-        return
-
-    record = {
-        "players": {
-            "white": current_user if HUMAN_COLOR == WHITE else "AI",
-            "black": current_user if HUMAN_COLOR == BLACK else "AI",
-        },
-        "moves": game_moves,
-        "winner": game_winner,
-        "timestamp": time.time()
-    }
-
-    with open("replays.json", "r") as f:
-        data = json.load(f)
-
-    data["games"].append(record)
-
-    with open("replays.json", "w") as f:
-        json.dump(data, f, indent=4)
-
-################################################
 # REPLAY LOADING
 ################################################
 
 def load_replay_list():
+    # Ensure file exists
     if not os.path.exists("replays.json"):
         with open("replays.json", "w") as f:
             json.dump({"games": []}, f)
@@ -926,7 +888,16 @@ def load_replay_list():
     with open("replays.json", "r") as f:
         data = json.load(f)
 
-    return data.get("games", [])
+    # Support both:
+    #  - {"games": [ ... ]}
+    #  - [ ... ]   (old style)
+    if isinstance(data, list):
+        games = data
+    else:
+        games = data.get("games", [])
+
+    return games
+
 
 def load_replay_game(index):
     games = load_replay_list()
@@ -946,12 +917,45 @@ replay_speed = 60  # frames per move
 def start_replay(game_data):
     global replay_active, replay_moves, replay_index
 
+    moves = game_data.get("moves", [])
+    if not moves:
+        # no moves to replay
+        replay_active = False
+        return
+
     replay_active = True
-    replay_moves = game_data["moves"]
+    replay_moves = moves
     replay_index = 0
 
     reset_game()
+
 # --- Manual replay helpers ---
+def extract_move_token(move_entry):
+    """
+    Accepts multiple historical formats and returns a move token like 'c3-d4' or 'e5xf4'.
+
+    Supported:
+      - "c3-d4" (string)
+      - {"move": "c3-d4", ...}
+      - {"start": [sr, sc], "end": [dr, dc]}
+    """
+    # Already a string like "c3-d4" or "e5xf4"
+    if isinstance(move_entry, str):
+        return move_entry
+
+    if isinstance(move_entry, dict):
+        # New format with 'move'
+        if "move" in move_entry:
+            return move_entry["move"]
+
+        # Old coordinate format
+        if "start" in move_entry and "end" in move_entry:
+            sr, sc = move_entry["start"]
+            dr, dc = move_entry["end"]
+            return f"{algebraic_square(sr, sc)}-{algebraic_square(dr, dc)}"
+
+    # Unknown format
+    return None
 
 def apply_replay_move_index(idx):
     """Apply a single recorded move by index onto the current board."""
@@ -959,7 +963,11 @@ def apply_replay_move_index(idx):
         return
 
     move = replay_moves[idx]
-    token = move["move"]  # e.g. "c3-d4" or "e5xf4"
+    token = extract_move_token(move)
+    if not token:
+        return
+
+    # token like "c3-d4" or "e5xf4"
     src = token[:2]
     dst = token[-2:]
 
@@ -975,7 +983,7 @@ def apply_replay_move_index(idx):
     # Handle capture (jump)
     if abs(dr - sr) == 2:
         jumped = piece_at((sr + dr) // 2, (sc + dc) // 2)
-        if jumped:
+        if jumped and jumped in board_state:
             board_state.remove(jumped)
 
     # Move the piece
@@ -984,7 +992,6 @@ def apply_replay_move_index(idx):
     # Promote if needed
     if (piece.player == WHITE and dr == 0) or (piece.player == BLACK and dr == 7):
         piece.king = True
-
 
 def reset_board_for_replay():
     """Reset the board to initial position, then apply moves up to replay_index."""
@@ -1434,7 +1441,14 @@ def draw_replay_file_list():
         pygame.draw.rect(screen, (80, 80, 80), rect)
         pygame.draw.rect(screen, (150, 150, 150), rect, 2)
 
-        label = f"{idx + 1}: {game['players']['white']} vs {game['players']['black']} (winner: {game['winner']})"
+
+        players = game.get("players", {})
+        white_name = players.get("white") or game.get("white_player", "?")
+        black_name = players.get("black") or game.get("black_player", "?")
+        winner = game.get("winner", "?")
+
+        label = f"{idx + 1}: {white_name} vs {black_name} (winner: {winner})"
+
         screen.blit(font_small.render(label, True, (255, 255, 255)),
                     (rect.x + 10, rect.y + 15))
 
@@ -1462,388 +1476,398 @@ def draw_replay_exit_button():
 
 
 running = True
+if __name__ == "__main__":
+    while running:
+        clock.tick(60)
+        mouse = pygame.mouse.get_pos()
 
-while running:
-    clock.tick(60)
-    mouse = pygame.mouse.get_pos()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
 
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
+            if event.type == pygame.VIDEORESIZE:
+                scale_window(event.size)
 
-        if event.type == pygame.VIDEORESIZE:
-            scale_window(event.size)
+            # ---------- START MENU FIRST ----------
+            if start_menu_active:
+                draw_start_menu()
 
-        # ---------- START MENU FIRST ----------
-        if start_menu_active:
-            draw_start_menu()
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if menu_buttons["pvp"].collidepoint(event.pos):
+                        pending_mode = "pvp"
+                        login_active = True
+                        start_menu_active = False
+                        login_message = ""
+                        login_username = ""
+                        login_password = ""
+                        login_stage = 1  # start with Player 1
+                        player1_user = None
+                        player2_user = None
 
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if menu_buttons["pvp"].collidepoint(event.pos):
-                    pending_mode = "pvp"
-                    login_active = True
-                    start_menu_active = False
-                    login_message = ""
-                    login_username = ""
-                    login_password = ""
-                    login_stage = 1  # start with Player 1
-                    player1_user = None
-                    player2_user = None
+                    elif menu_buttons["easy"].collidepoint(event.pos):
+                        pending_mode = "ai_easy"
+                        login_active = True
+                        start_menu_active = False
+                        login_message = ""
+                        login_username = ""
+                        login_password = ""
+                        login_stage = 1  # just one login (human)
+                        player1_user = None
+                        player2_user = "AI"
 
-                elif menu_buttons["easy"].collidepoint(event.pos):
-                    pending_mode = "ai_easy"
-                    login_active = True
-                    start_menu_active = False
-                    login_message = ""
-                    login_username = ""
-                    login_password = ""
-                    login_stage = 1  # just one login (human)
-                    player1_user = None
-                    player2_user = "AI"
+                    elif menu_buttons["hard"].collidepoint(event.pos):
+                        pending_mode = "ai_hard"
+                        login_active = True
+                        start_menu_active = False
+                        login_message = ""
+                        login_username = ""
+                        login_password = ""
+                        login_stage = 1  # just one login (human)
+                        player1_user = None
+                        player2_user = "AI"
 
-                elif menu_buttons["hard"].collidepoint(event.pos):
-                    pending_mode = "ai_hard"
-                    login_active = True
-                    start_menu_active = False
-                    login_message = ""
-                    login_username = ""
-                    login_password = ""
-                    login_stage = 1  # just one login (human)
-                    player1_user = None
-                    player2_user = "AI"
+                    elif menu_buttons["replay"].collidepoint(event.pos):
+                        start_menu_active = False
+                        replay_select_active = True
 
-                elif menu_buttons["replay"].collidepoint(event.pos):
-                    start_menu_active = False
-                    replay_select_active = True
+                continue  # skip rest while on start menu
 
-            continue  # skip rest while on start menu
+            # ---------- LOGIN AFTER MODE ----------
+            if login_active:
+                user_rect, pass_rect, login_rect, reg_rect = draw_login_screen()
 
-        # ---------- LOGIN AFTER MODE ----------
-        if login_active:
-            user_rect, pass_rect, login_rect, reg_rect = draw_login_screen()
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if user_rect.collidepoint(event.pos):
+                        login_input = "user"
+                    elif pass_rect.collidepoint(event.pos):
+                        login_input = "pass"
 
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if user_rect.collidepoint(event.pos):
-                    login_input = "user"
-                elif pass_rect.collidepoint(event.pos):
-                    login_input = "pass"
-
-                elif login_rect.collidepoint(event.pos):
-                    # LOGIN existing user
-                    ok, msg = verify_login(login_username, login_password)
-                    login_message = msg
-                    if ok:
-                        if pending_mode == "pvp":
-                            # two-player login
-                            if login_stage == 1:
+                    elif login_rect.collidepoint(event.pos):
+                        # LOGIN existing user
+                        ok, msg = verify_login(login_username, login_password)
+                        login_message = msg
+                        if ok:
+                            if pending_mode == "pvp":
+                                # two-player login
+                                if login_stage == 1:
+                                    player1_user = login_username
+                                    login_message = "Player 1 logged in. Now Player 2."
+                                    login_username = ""
+                                    login_password = ""
+                                    login_stage = 2
+                                elif login_stage == 2:
+                                    player2_user = login_username
+                                    current_user = player1_user  # "main" user if you need one
+                                    login_active = False
+                                    login_stage = 0
+                                    game_vs_ai = False
+                                    reset_game()
+                            else:
+                                # single-player vs AI
                                 player1_user = login_username
-                                login_message = "Player 1 logged in. Now Player 2."
-                                login_username = ""
-                                login_password = ""
-                                login_stage = 2
-                            elif login_stage == 2:
-                                player2_user = login_username
-                                current_user = player1_user  # "main" user if you need one
+                                player2_user = "AI"
+                                current_user = login_username
                                 login_active = False
                                 login_stage = 0
-                                game_vs_ai = False
+
+                                game_vs_ai = True
+                                if pending_mode == "ai_easy":
+                                    AI_DIFFICULTY = "EASY"
+                                elif pending_mode == "ai_hard":
+                                    AI_DIFFICULTY = "HARD"
+
                                 reset_game()
-                        else:
-                            # single-player vs AI
-                            player1_user = login_username
-                            player2_user = "AI"
+
+                    elif reg_rect.collidepoint(event.pos):
+                        # REGISTER new user
+                        ok, msg = register_user(login_username, login_password)
+                        login_message = msg
+                        if ok:
+                            if pending_mode == "pvp":
+                                if login_stage == 1:
+                                    player1_user = login_username
+                                    login_message = "Player 1 registered. Now Player 2."
+                                    login_username = ""
+                                    login_password = ""
+                                    login_stage = 2
+                                elif login_stage == 2:
+                                    player2_user = login_username
+                                    current_user = player1_user
+                                    login_active = False
+                                    login_stage = 0
+                                    game_vs_ai = False
+                                    reset_game()
+                            else:
+                                # single-player vs AI
+                                player1_user = login_username
+                                player2_user = "AI"
+                                current_user = login_username
+                                login_active = False
+                                login_stage = 0
+
+                                game_vs_ai = True
+                                if pending_mode == "ai_easy":
+                                    AI_DIFFICULTY = "EASY"
+                                elif pending_mode == "ai_hard":
+                                    AI_DIFFICULTY = "HARD"
+
+                                reset_game()
+
+                    elif reg_rect.collidepoint(event.pos):
+                        # REGISTER
+                        ok, msg = register_user(login_username, login_password)
+                        login_message = msg
+                        if ok:
+                            # auto-login after registration
                             current_user = login_username
                             login_active = False
-                            login_stage = 0
 
-                            game_vs_ai = True
-                            if pending_mode == "ai_easy":
+                            if pending_mode == "pvp":
+                                game_vs_ai = False
+                            elif pending_mode == "ai_easy":
+                                game_vs_ai = True
                                 AI_DIFFICULTY = "EASY"
                             elif pending_mode == "ai_hard":
+                                game_vs_ai = True
                                 AI_DIFFICULTY = "HARD"
 
                             reset_game()
 
-                elif reg_rect.collidepoint(event.pos):
-                    # REGISTER new user
-                    ok, msg = register_user(login_username, login_password)
-                    login_message = msg
-                    if ok:
-                        if pending_mode == "pvp":
-                            if login_stage == 1:
-                                player1_user = login_username
-                                login_message = "Player 1 registered. Now Player 2."
-                                login_username = ""
-                                login_password = ""
-                                login_stage = 2
-                            elif login_stage == 2:
-                                player2_user = login_username
-                                current_user = player1_user
-                                login_active = False
-                                login_stage = 0
-                                game_vs_ai = False
-                                reset_game()
+                if event.type == pygame.KEYDOWN:
+                    if login_input == "user":
+                        if event.key == pygame.K_BACKSPACE:
+                            login_username = login_username[:-1]
                         else:
-                            # single-player vs AI
-                            player1_user = login_username
-                            player2_user = "AI"
-                            current_user = login_username
-                            login_active = False
-                            login_stage = 0
+                            login_username += event.unicode
+                    elif login_input == "pass":
+                        if event.key == pygame.K_BACKSPACE:
+                            login_password = login_password[:-1]
+                        else:
+                            login_password += event.unicode
 
-                            game_vs_ai = True
-                            if pending_mode == "ai_easy":
-                                AI_DIFFICULTY = "EASY"
-                            elif pending_mode == "ai_hard":
-                                AI_DIFFICULTY = "HARD"
+                continue  # skip rest while on login screen
 
-                            reset_game()
+            ########################################
+            # REPLAY FILE SELECT MENU
+            ########################################
+            if replay_select_active:
+                buttons, exit_rect = draw_replay_file_list()
 
-                elif reg_rect.collidepoint(event.pos):
-                    # REGISTER
-                    ok, msg = register_user(login_username, login_password)
-                    login_message = msg
-                    if ok:
-                        # auto-login after registration
-                        current_user = login_username
-                        login_active = False
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    # Clicked a replay file
+                    for rect, idx in buttons:
+                        if rect.collidepoint(event.pos):
+                            game_data = load_replay_game(idx)
+                            if game_data is not None:
+                                start_replay(game_data)
+                                replay_select_active = False
+                            break
 
-                        if pending_mode == "pvp":
-                            game_vs_ai = False
-                        elif pending_mode == "ai_easy":
-                            game_vs_ai = True
-                            AI_DIFFICULTY = "EASY"
-                        elif pending_mode == "ai_hard":
-                            game_vs_ai = True
-                            AI_DIFFICULTY = "HARD"
+                    # Clicked the Back/Exit button
+                    if exit_rect.collidepoint(event.pos):
+                        replay_select_active = False
 
-                        reset_game()
+                        start_menu_active = True
 
-            if event.type == pygame.KEYDOWN:
-                if login_input == "user":
-                    if event.key == pygame.K_BACKSPACE:
-                        login_username = login_username[:-1]
-                    else:
-                        login_username += event.unicode
-                elif login_input == "pass":
-                    if event.key == pygame.K_BACKSPACE:
-                        login_password = login_password[:-1]
-                    else:
-                        login_password += event.unicode
+                continue
 
-            continue  # skip rest while on login screen
+            ########################################
+            # REPLAY MODE ACTIVE
+            ########################################
 
-        ########################################
-        # REPLAY FILE SELECT MENU
-        ########################################
-        if replay_select_active:
-            buttons, exit_rect = draw_replay_file_list()
+            ########################################
+            # REPLAY MODE ACTIVE (manual controls)
+            ########################################
+            if replay_active:
+                # Only handle clicks here, NO drawing / flip
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    # Recreate the same rects as in draw_replay_controls()
+                    btn_h = int(45 * UI_SCALE)
+                    btn_w = int(140 * UI_SCALE)
+                    pad = int(15 * UI_SCALE)
+                    top_y = pad
 
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                # Clicked a replay file
-                for rect, idx in buttons:
-                    if rect.collidepoint(event.pos):
-                        game_data = load_replay_game(idx)
-                        if game_data is not None:
-                            start_replay(game_data)
-                            replay_select_active = False
-                        break
+                    btn_prev = pygame.Rect(pad, top_y, btn_w, btn_h)
+                    btn_next = pygame.Rect(pad + btn_w + pad, top_y, btn_w, btn_h)
+                    btn_restart = pygame.Rect(pad + (btn_w + pad) * 2, top_y, btn_w, btn_h)
+                    btn_exit = pygame.Rect(pad + (btn_w + pad) * 3, top_y, btn_w, btn_h)
 
-                # Clicked the Back/Exit button
-                if exit_rect.collidepoint(event.pos):
-                    replay_select_active = False
+                    # Back one move
+                    if btn_prev.collidepoint(event.pos):
+                        if replay_index > 0:
+                            replay_index -= 1
+                            reset_board_for_replay()
 
-                    start_menu_active = True
+                    # Forward one move
+                    elif btn_next.collidepoint(event.pos):
+                        if replay_index < len(replay_moves):
+                            apply_replay_move_index(replay_index)
+                            replay_index += 1
 
-            continue
-
-        ########################################
-        # REPLAY MODE ACTIVE
-        ########################################
-
-        ########################################
-        # REPLAY MODE ACTIVE (manual controls)
-        ########################################
-        if replay_active:
-            # Only handle clicks here, NO drawing / flip
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                # Recreate the same rects as in draw_replay_controls()
-                btn_h = int(45 * UI_SCALE)
-                btn_w = int(140 * UI_SCALE)
-                pad = int(15 * UI_SCALE)
-                top_y = pad
-
-                btn_prev = pygame.Rect(pad, top_y, btn_w, btn_h)
-                btn_next = pygame.Rect(pad + btn_w + pad, top_y, btn_w, btn_h)
-                btn_restart = pygame.Rect(pad + (btn_w + pad) * 2, top_y, btn_w, btn_h)
-                btn_exit = pygame.Rect(pad + (btn_w + pad) * 3, top_y, btn_w, btn_h)
-
-                # Back one move
-                if btn_prev.collidepoint(event.pos):
-                    if replay_index > 0:
-                        replay_index -= 1
+                    # Restart
+                    elif btn_restart.collidepoint(event.pos):
+                        replay_index = 0
                         reset_board_for_replay()
 
-                # Forward one move
-                elif btn_next.collidepoint(event.pos):
-                    if replay_index < len(replay_moves):
-                        apply_replay_move_index(replay_index)
-                        replay_index += 1
-
-                # Restart
-                elif btn_restart.collidepoint(event.pos):
-                    replay_index = 0
-                    reset_board_for_replay()
-
-                # Exit replay
-                elif btn_exit.collidepoint(event.pos):
-                    replay_active = False
-                    replay_index = 0
-                    start_menu_active = True
+                    # Exit replay
+                    elif btn_exit.collidepoint(event.pos):
+                        replay_active = False
+                        replay_index = 0
+                        start_menu_active = True
 
 
-            continue
+                continue
 
-        ########################################
-        # SETTINGS MENU
-        ########################################
-        if settings_menu_active:
-            draw_settings_menu()
+            ########################################
+            # SETTINGS MENU
+            ########################################
+            if settings_menu_active:
+                draw_settings_menu()
 
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if menu_buttons["settings_close"].collidepoint(event.pos):
+                        settings_menu_active = False
+                    elif menu_buttons["settings_easy"].collidepoint(event.pos):
+                        AI_DIFFICULTY = "EASY"
+                    elif menu_buttons["settings_hard"].collidepoint(event.pos):
+                        AI_DIFFICULTY = "HARD"
+
+                pygame.display.flip()
+                continue
+
+            ########################################
+            # NORMAL GAMEPLAY
+            ########################################
+
+            btn_menu, btn_reset, btn_replay = draw_ui_buttons()
+
+            # Top buttons
             if event.type == pygame.MOUSEBUTTONDOWN:
-                if menu_buttons["settings_close"].collidepoint(event.pos):
-                    settings_menu_active = False
-                elif menu_buttons["settings_easy"].collidepoint(event.pos):
-                    AI_DIFFICULTY = "EASY"
-                elif menu_buttons["settings_hard"].collidepoint(event.pos):
-                    AI_DIFFICULTY = "HARD"
+                if btn_menu.collidepoint(event.pos):
+                    settings_menu_active = True
+                    continue
+                if btn_reset.collidepoint(event.pos):
+                    reset_game()
+                    continue
+                if btn_replay.collidepoint(event.pos):
+                    replay_select_active = True
+                    continue
 
-            pygame.display.flip()
-            continue
-
-        ########################################
-        # NORMAL GAMEPLAY
-        ########################################
-
-        btn_menu, btn_reset, btn_replay = draw_ui_buttons()
-
-        # Top buttons
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            if btn_menu.collidepoint(event.pos):
-                settings_menu_active = True
-                continue
-            if btn_reset.collidepoint(event.pos):
-                reset_game()
-                continue
-            if btn_replay.collidepoint(event.pos):
-                replay_select_active = True
+            # No moves if game over
+            if game_over:
                 continue
 
-        # No moves if game over
-        if game_over:
-            continue
+            ########################################
+            # PLAYER CLICK PIECE (select)
+            ########################################
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if not dragging:
+                    for p in board_state:
+                        if p.clicked(event.pos) and p.player == get_current_turn():
+                            forced = get_forced_jump_pieces(get_current_turn())
+                            if forced and p not in forced:
+                                break
 
-        ########################################
-        # PLAYER CLICK PIECE (select)
-        ########################################
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if not dragging:
-                for p in board_state:
-                    if p.clicked(event.pos) and p.player == get_current_turn():
-                        forced = get_forced_jump_pieces(get_current_turn())
-                        if forced and p not in forced:
-                            break
+                            valid = get_valid_moves(p, only_jumps=bool(forced))
+                            if valid:
+                                selected_piece = p
+                                valid_moves = valid
+                                dragging = True
+                                drag_origin = p.location
+                                break
 
-                        valid = get_valid_moves(p, only_jumps=bool(forced))
-                        if valid:
-                            selected_piece = p
-                            valid_moves = valid
-                            dragging = True
-                            drag_origin = p.location
-                            break
+            ########################################
+            # DRAGGING A PIECE
+            ########################################
+            if event.type == pygame.MOUSEMOTION and dragging and selected_piece:
+                selected_piece.update_location(event.pos)
 
-        ########################################
-        # DRAGGING A PIECE
-        ########################################
-        if event.type == pygame.MOUSEMOTION and dragging and selected_piece:
-            selected_piece.update_location(event.pos)
+            ########################################
+            # RELEASE PIECE (drop)
+            ########################################
+            if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and dragging:
+                dragging = False
 
-        ########################################
-        # RELEASE PIECE (drop)
-        ########################################
-        if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and dragging:
-            dragging = False
+                if not selected_piece:
+                    continue
 
-            if not selected_piece:
-                continue
+                sr, sc = pixel_to_board(drag_origin)
+                dr, dc = pixel_to_board(event.pos)
 
-            sr, sc = pixel_to_board(drag_origin)
-            dr, dc = pixel_to_board(event.pos)
+                if (dr, dc) not in valid_moves:
+                    selected_piece.update_location(drag_origin)
+                    selected_piece = None
+                    valid_moves = []
+                    continue
 
-            if (dr, dc) not in valid_moves:
-                selected_piece.update_location(drag_origin)
+                result = execute_move(selected_piece, sr, sc, dr, dc)
+
+
+
                 selected_piece = None
                 valid_moves = []
-                continue
 
-            execute_move(selected_piece, sr, sc, dr, dc)
+                # ---- AI RESPONSE TURN ----
+                if game_vs_ai and not game_over and get_current_turn() == AI_COLOR:
+                    if AI_DIFFICULTY == "EASY":
+                        ai = easy_AI(AI_COLOR)
+                    else:
+                        ai = hard_AI(AI_COLOR)
+                    apply_ai_move(ai)
 
-            selected_piece = None
-            valid_moves = []
+        ###############################################
+        # DRAW FRAME
+        ###############################################
+        screen.fill((0, 0, 0))
 
-    ###############################################
-    # DRAW FRAME
-    ###############################################
-    screen.fill((0, 0, 0))
+        if login_active:
+            draw_login_screen()
+        elif start_menu_active:
+            draw_start_menu()
+        elif replay_select_active:
+            draw_replay_file_list()
+        elif replay_active:
+            draw_board()
+            draw_all_pieces()
+            draw_replay_controls()
 
-    if login_active:
-        draw_login_screen()
-    elif start_menu_active:
-        draw_start_menu()
-    elif replay_select_active:
-        draw_replay_file_list()
-    elif replay_active:
-        draw_board()
-        draw_all_pieces()
-        draw_replay_controls()
+        else:
+            draw_board()
+            draw_all_pieces()
+            draw_ui_buttons()
 
-    else:
-        draw_board()
-        draw_all_pieces()
-        draw_ui_buttons()
+            # highlight valid moves
+            if selected_piece:
+                for r, c in valid_moves:
+                    pygame.draw.circle(screen, (255, 255, 0),
+                                       board_to_pixel(r, c), TILE_SIZE//6)
 
-        # highlight valid moves
-        if selected_piece:
-            for r, c in valid_moves:
+            # highlight forced pieces
+            for p in get_forced_jump_pieces(get_current_turn()):
                 pygame.draw.circle(screen, (255, 255, 0),
-                                   board_to_pixel(r, c), TILE_SIZE//6)
+                                   p.location, p.radius + 5, 3)
 
-        # highlight forced pieces
-        for p in get_forced_jump_pieces(get_current_turn()):
-            pygame.draw.circle(screen, (255, 255, 0),
-                               p.location, p.radius + 5, 3)
+            # highlight selected
+            if selected_piece:
+                pygame.draw.circle(screen, (255, 0, 0),
+                                   selected_piece.location, selected_piece.radius + 5, 3)
 
-        # highlight selected
-        if selected_piece:
-            pygame.draw.circle(screen, (255, 0, 0),
-                               selected_piece.location, selected_piece.radius + 5, 3)
+            # show settings menu on top
+            if settings_menu_active:
+                draw_settings_menu()
 
-        # show settings menu on top
-        if settings_menu_active:
-            draw_settings_menu()
+            # game over
+            if game_over:
+                overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+                overlay.set_alpha(180)
+                overlay.fill((0, 0, 0))
+                screen.blit(overlay, (0, 0))
 
-        # game over
-        if game_over:
-            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-            overlay.set_alpha(180)
-            overlay.fill((0, 0, 0))
-            screen.blit(overlay, (0, 0))
+                end_font = pygame.font.SysFont(None, int(60 * UI_SCALE))
+                text = end_font.render(f"Game Over — {game_winner} Wins!", True, (255, 255, 255))
+                screen.blit(text, (SCREEN_WIDTH//2 - text.get_width()//2,
+                                   SCREEN_HEIGHT//2 - text.get_height()//2))
 
-            end_font = pygame.font.SysFont(None, int(60 * UI_SCALE))
-            text = end_font.render(f"Game Over — {game_winner} Wins!", True, (255, 255, 255))
-            screen.blit(text, (SCREEN_WIDTH//2 - text.get_width()//2,
-                               SCREEN_HEIGHT//2 - text.get_height()//2))
+        pygame.display.flip()
 
-    pygame.display.flip()
-
-pygame.quit()
+    pygame.quit()
