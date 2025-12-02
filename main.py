@@ -294,10 +294,8 @@ class Checker:
         return self.rect.collidepoint(pos)
 
     def update_location(self, new_pos):
-        """Move to a new pixel location and re-check king status."""
         self.location = new_pos
         self.update_rect()
-        check_king_status(self)
 
     def make_king(self):
         """Promote to king (used in replay and in-game)."""
@@ -688,6 +686,12 @@ def execute_move(piece, sr, sc, dr, dc):
 
     # Move the piece
     piece.update_location(board_to_pixel(dr, dc))
+
+    # Promote ONLY after a valid move, not while dragging
+    if piece.player == WHITE and dr == 0:
+        piece.make_king()
+    elif piece.player == BLACK and dr == 7:
+        piece.make_king()
 
     # Log move
     record_move(piece, sr, sc, dr, dc, is_jump)
